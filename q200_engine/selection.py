@@ -1,7 +1,16 @@
-from typing import Dict, List, Any
+"""
+Q200 Engine - Selection Layer
+
+Q200 V3.1
+"""
+
+from __future__ import annotations
+
+from .kelly import quarter_kelly
+from .odds import expected_value
 
 
-MIN_ODDS = 1.50
+MINIMUM_ODDS = 1.50
 
 EV_THRESHOLDS = {
     "LOW": 0.05,
@@ -11,109 +20,95 @@ EV_THRESHOLDS = {
 
 
 def select(
-    probabilities: Dict[str, float],
-    odds: Dict[str, float],
+    probabilities: dict[str, float],
+    odds: dict[str, float],
     bankroll: float,
     uncertainty: str = "MEDIUM",
-) -> List[Dict[str, Any]]:
-    """
-    Q200 selection engine.
+) -> list[dict]:
 
-    Parameters
-    ----------
-    probabilities:
-        Model probabilities, e.g.
-        {"HOME": 0.60, "DRAW": 0.20, "AWAY": 0.20}
+    uncertainty = uncertainty.upper()
 
-    odds:
-        Market odds, e.g.
-        {"HOME": 2.0, "DRAW": 4.0, "AWAY": 5.0}
-
-    bankroll:
-        Current bankroll.
-
-    uncertainty:
-        LOW / MEDIUM / HIGH
-
-    Returns
-    -------
-    List of eligible selections.
-    """
-
-    if bankroll <= 0:
-        raise ValueError("bankroll must be greater than 0")
-
-    uncertainty = str(uncertainty).upper()
+    if uncertainty == "VERY_HIGH":
+        return [
+            {
+                "outcome": outcome,
+                "odds": odds.get(outcome),
+                "probability": probabilities.get(outcome),
+                "eligible": False,
+                "reason": "VERY_HIGH uncertainty -> NO BET",
+            }
+            for outcome in probabilities
+        ]
 
     if uncertainty not in EV_THRESHOLDS:
         raise ValueError(
-            "uncertainty must be LOW, MEDIUM or HIGH"
+            "uncertainty LOW, MEDIUM, HIGH veya VERY_HIGH olmalıdır."
         )
 
-    if not isinstance(probabilities, dict):
-        raise TypeError("probabilities must be a dictionary")
+    threshold = EV_THRESHOLDS[uncertainty]
 
-    if not isinstance(odds, dict):
-        raise TypeError("odds must be a dictionary")
-
-    # Minimum odds filter
-    for outcome, odd in odds.items():
-        if odd < MIN_ODDS:
-            raise ValueError(
-                f"Minimum odds is {MIN_ODDS:.2f}: "
-                f"{outcome}={odd}"
-            )
-
-    selections = []
-
-    min_ev = EV_THRESHOLDS[uncertainty]
+    rows = []
 
     for outcome, probability in probabilities.items():
 
         if outcome not in odds:
             continue
 
-        odd = float(odds[outcome])
-        probability = float(probability)
+        odd = odds[outcome]
 
-        if probability <= 0:
-            continue
+        ev = expected_value(
+            probability,
+            odd,
+        )
 
-        if probability > 1:
-            raise ValueError(
-                f"Probability must be between 0 and 1: {outcome}"
-            )
+        eligible = (
+            odd >= MINIMUM_ODDS
+            and ev >= threshold
+        )
 
-        # Fair odds
-        fair_odds = 1.0 / probability
+        kelly = quarter_kelly(
+            probability,
+            odd,
+            bankroll,
+        )
 
-        # Expected Value
-        ev = (probability * odd) - 1.0
-
-        # Value percentage
-        value = ev * 100.0
-
-        eligible = ev >= min_ev
-
-        row = {
+        rows.append({
             "outcome": outcome,
             "probability": probability,
             "odds": odd,
-            "fair_odds": fair_odds,
             "ev": ev,
-            "value": value,
-            "uncertainty": uncertainty,
             "eligible": eligible,
-            "bankroll": bankroll,
-        }
+            "stake": kelly["stake"],
+            "quarter_kelly": kelly["quarter_kelly"],
+            "reason": (
+                "ELIGIBLE"
+                if eligible
+                else "FILTERED"
+            ),
+        })
 
-        if eligible:
-            selections.append(row)
-
-    # Highest EV first
-    selections.sort(
-        key=lambda x: x["ev"],
-        reverse=True
+    rows.sort(
+        key=lambda x: (
+            x["eligible"],
+            x["ev"],
+            x["probability"],
+        ),
+        reverse=True,
     )
 
-    return selections
+    if not rows:
+        raise ValueError(
+            "Geçerli selection bulunamadı."
+        )
+
+    # Minimum odds filtresi için özel davranış:
+    # Hiçbir oran minimum 1.50'yi geçmiyorsa hata.
+    if all(
+        row["odds"] < MINIMUM_ODDS
+        for row in rows
+    ):
+        raise ValueError(
+            "Minimum odds filter: tüm oranlar 1.50 altında."
+        )
+
+    return rows
