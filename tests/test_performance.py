@@ -125,6 +125,7 @@ def row(
     outcome,
     stake,
     profit,
+    settlement=None,
 ):
 
     return {
@@ -134,7 +135,11 @@ def row(
 
         "stake": stake,
 
-        "settlement": outcome,
+        "settlement": (
+            settlement
+            if settlement is not None
+            else outcome
+        ),
 
         "profit": profit,
 
@@ -588,4 +593,231 @@ def test_invalid_history_is_rejected():
 
         summarize_history(
             None
+        )
+
+
+def test_market_performance_groups_by_selection_outcome():
+
+    records = [
+        make_record(
+            1,
+            selections=[
+                row(
+                    "HOME",
+                    100.0,
+                    100.0,
+                    "WIN",
+                ),
+                row(
+                    "OVER_2.5",
+                    50.0,
+                    -50.0,
+                    "LOSS",
+                ),
+                row(
+                    "BTTS_YES",
+                    25.0,
+                    25.0,
+                    "WIN",
+                ),
+            ],
+        ),
+
+        make_record(
+            2,
+            selections=[
+                row(
+                    "HOME",
+                    80.0,
+                    -80.0,
+                    "LOSS",
+                ),
+                row(
+                    "OVER_2.5",
+                    40.0,
+                    40.0,
+                    "WIN",
+                ),
+            ],
+        ),
+    ]
+
+    from q200_engine.performance import (
+        market_performance,
+    )
+
+    result = market_performance(
+        FakeHistory(records)
+    )
+
+    assert set(result) == {
+        "HOME",
+        "OVER_2.5",
+        "BTTS_YES",
+    }
+
+    assert (
+        result["HOME"].total_bets
+        == 2
+    )
+
+    assert (
+        result["HOME"].wins
+        == 1
+    )
+
+    assert (
+        result["HOME"].losses
+        == 1
+    )
+
+    assert (
+        result["HOME"].voids
+        == 0
+    )
+
+    assert (
+        result["HOME"].total_stake
+        == 180.0
+    )
+
+    assert (
+        result["HOME"].total_profit
+        == 20.0
+    )
+
+    assert math.isclose(
+        result["HOME"].roi,
+        20.0 / 180.0,
+    )
+
+    assert (
+        result["HOME"].hit_rate
+        == 0.5
+    )
+
+    assert (
+        result["OVER_2.5"].total_bets
+        == 2
+    )
+
+    assert (
+        result["OVER_2.5"].wins
+        == 1
+    )
+
+    assert (
+        result["OVER_2.5"].losses
+        == 1
+    )
+
+    assert (
+        result["OVER_2.5"].total_stake
+        == 90.0
+    )
+
+    assert (
+        result["OVER_2.5"].total_profit
+        == -10.0
+    )
+
+    assert (
+        result["BTTS_YES"].total_bets
+        == 1
+    )
+
+    assert (
+        result["BTTS_YES"].wins
+        == 1
+    )
+
+    assert (
+        result["BTTS_YES"].total_profit
+        == 25.0
+    )
+
+
+def test_market_performance_ignores_unsettled_records():
+
+    records = [
+        make_record(
+            1,
+            settled=False,
+        ),
+
+        make_record(
+            2,
+            selections=[
+                row(
+                    "AWAY",
+                    100.0,
+                    -100.0,
+                    "LOSS",
+                ),
+            ],
+        ),
+    ]
+
+    from q200_engine.performance import (
+        market_performance,
+    )
+
+    result = market_performance(
+        FakeHistory(records)
+    )
+
+    assert set(result) == {
+        "AWAY"
+    }
+
+    assert (
+        result["AWAY"].total_bets
+        == 1
+    )
+
+    assert (
+        result["AWAY"].losses
+        == 1
+    )
+
+
+def test_market_performance_returns_empty_for_empty_history():
+
+    from q200_engine.performance import (
+        market_performance,
+    )
+
+    result = market_performance(
+        FakeHistory([])
+    )
+
+    assert result == {}
+
+
+def test_market_performance_rejects_invalid_settlement():
+
+    records = [
+        make_record(
+            1,
+            selections=[
+                row(
+                    "HOME",
+                    100.0,
+                    0.0,
+                    "INVALID",
+                ),
+            ],
+        )
+    ]
+
+    from q200_engine.performance import (
+        market_performance,
+    )
+
+    with pytest.raises(
+        ValueError
+    ):
+
+        market_performance(
+            FakeHistory(records)
         )
