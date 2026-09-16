@@ -2,6 +2,23 @@
 Q200 Engine - Model Layer
 
 Q200 V3.1
+
+Stage 1:
+
+Statistics
+    ↓
+Lambda
+    ↓
+Poisson
+    ↓
+Monte Carlo
+    ↓
+Model Probabilities
+    ↓
+LOCK
+
+KRİTİK KURAL:
+Odds bu katmanda KULLANILMAZ.
 """
 
 from __future__ import annotations
@@ -9,13 +26,16 @@ from __future__ import annotations
 from math import isfinite
 from typing import Optional
 
-from .schema import TeamStats, ModelSnapshot
-from .poisson_model import poisson_score_matrix
 from .monte_carlo import simulate_match
+from .poisson_model import (
+    poisson_match_probabilities,
+    poisson_score_matrix,
+)
+from .schema import ModelSnapshot, TeamStats
 
 
 # =========================================================
-# CONSTANTS
+# MODEL WEIGHTS
 # =========================================================
 
 HOME_GF_WEIGHT = 0.35
@@ -28,8 +48,19 @@ HOME_GA_WEIGHT = 0.35
 AWAY_XG_WEIGHT = 0.15
 HOME_XGA_WEIGHT = 0.15
 
+
+# =========================================================
+# MONTE CARLO
+# =========================================================
+
 MONTE_CARLO_ITERATIONS = 100_000
-MONTE_CARLO_SEED = 42
+
+
+# =========================================================
+# MODEL VERSION
+# =========================================================
+
+MODEL_VERSION = "Q200-V3.1"
 
 
 # =========================================================
@@ -38,7 +69,13 @@ MONTE_CARLO_SEED = 42
 
 def _valid(value: Optional[float]) -> bool:
     """
-    Değerin kullanılabilir olup olmadığını kontrol eder.
+    Değerin kullanılabilir bir istatistik olup olmadığını kontrol eder.
+
+    Geçerli değer:
+        - None değil
+        - int veya float
+        - finite
+        - negatif değil
     """
 
     return (
@@ -47,6 +84,59 @@ def _valid(value: Optional[float]) -> bool:
         and isfinite(float(value))
         and float(value) >= 0
     )
+
+
+# =========================================================
+# WEIGHTED AVERAGE
+# =========================================================
+
+def _weighted_average(
+    components: list[tuple[Optional[float], float]],
+    name: str,
+) -> float:
+    """
+    Mevcut istatistikleri ağırlıklı olarak birleştirir.
+
+    Bir veri eksikse mevcut verilerin ağırlıkları
+    kendi aralarında normalize edilir.
+
+    Örnek:
+
+        GF   = 2.0  weight=0.35
+        GA   = 1.8  weight=0.35
+        xG   = None
+        xGA  = 1.4  weight=0.15
+
+    Eksik xG nedeniyle kalan ağırlıklar normalize edilir.
+    """
+
+    available = [
+        (float(value), weight)
+        for value, weight in components
+        if _valid(value)
+    ]
+
+    if not available:
+        raise ValueError(
+            f"{name} lambda için yeterli veri bulunamadı."
+        )
+
+    weight_sum = sum(
+        weight
+        for _, weight in available
+    )
+
+    if weight_sum <= 0:
+        raise ValueError(
+            f"{name} lambda ağırlık toplamı geçersiz."
+        )
+
+    result = sum(
+        value * (weight / weight_sum)
+        for value, weight in available
+    )
+
+    return round(result, 12)
 
 
 # =========================================================
@@ -73,8 +163,10 @@ def calculate_lambdas(
       + 0.15 * Away xG
       + 0.15 * Home xGA
 
-    xG/xGA eksikse mevcut değerler üzerinden
-    ağırlıklar yeniden normalize edilir.
+    xG/xGA eksikse mevcut ağırlıklar normalize edilir.
+
+    KRİTİK:
+    Odds burada kullanılmaz.
     """
 
     if not isinstance(stats, TeamStats):
@@ -82,46 +174,44 @@ def calculate_lambdas(
             "stats must be an instance of TeamStats"
         )
 
-    # =====================================================
-    # HOME
-    # =====================================================
+    # -----------------------------------------------------
+    # HOME LAMBDA
+    # -----------------------------------------------------
 
-    home_components = [
-        (stats.home_gf, HOME_GF_WEIGHT),
-        (stats.away_ga, AWAY_GA_WEIGHT),
-        (stats.home_xg, HOME_XG_WEIGHT),
-        (stats.away_xga, AWAY_XGA_WEIGHT),
-    ]
-
-    home_available = [
-        (value, weight)
-        for value, weight in home_components
-        if _valid(value)
-    ]
-
-    if not home_available:
-        raise ValueError(
-            "HOME lambda için yeterli veri bulunamadı."
-        )
-
-    home_weight_sum = sum(
-        weight
-        for _, weight in home_available
+    lambda_home = _weighted_average(
+        [
+            (
+                stats.home_gf,
+                HOME_GF_WEIGHT,
+            ),
+            (
+                stats.away_ga,
+                AWAY_GA_WEIGHT,
+            ),
+            (
+                stats.home_xg,
+                HOME_XG_WEIGHT,
+            ),
+            (
+                stats.away_xga,
+                AWAY_XGA_WEIGHT,
+            ),
+        ],
+        "HOME",
     )
 
-    lambda_home = sum(
-        float(value) * (weight / home_weight_sum)
-        for value, weight in home_available
-    )
-
-    # =====================================================
-    # AWAY
-    # =====================================================
-
-    # Yeni standart away_xg mevcutsa onu kullan.
+    # -----------------------------------------------------
+    # AWAY xG
+    # -----------------------------------------------------
     #
-    # Legacy 7 parametreli yapılarda away_xga
-    # fallback olarak kullanılır.
+    # Legacy uyumluluk:
+    #
+    # Eski 7-parametreli TeamStats yapısında
+    # away_xg bulunmadığında away_xga son alan olabilir.
+    #
+    # Bu durumda mevcut away_xga değeri fallback olarak
+    # away_xg tarafında da kullanılabilir.
+    # -----------------------------------------------------
 
     away_xg = (
         stats.away_xg
@@ -129,42 +219,51 @@ def calculate_lambdas(
         else stats.away_xga
     )
 
-    away_components = [
-        (stats.away_gf, AWAY_GF_WEIGHT),
-        (stats.home_ga, HOME_GA_WEIGHT),
-        (away_xg, AWAY_XG_WEIGHT),
-        (stats.home_xga, HOME_XGA_WEIGHT),
-    ]
+    # -----------------------------------------------------
+    # AWAY LAMBDA
+    # -----------------------------------------------------
 
-    away_available = [
-        (value, weight)
-        for value, weight in away_components
-        if _valid(value)
-    ]
-
-    if not away_available:
-        raise ValueError(
-            "AWAY lambda için yeterli veri bulunamadı."
-        )
-
-    away_weight_sum = sum(
-        weight
-        for _, weight in away_available
+    lambda_away = _weighted_average(
+        [
+            (
+                stats.away_gf,
+                AWAY_GF_WEIGHT,
+            ),
+            (
+                stats.home_ga,
+                HOME_GA_WEIGHT,
+            ),
+            (
+                away_xg,
+                AWAY_XG_WEIGHT,
+            ),
+            (
+                stats.home_xga,
+                HOME_XGA_WEIGHT,
+            ),
+        ],
+        "AWAY",
     )
 
-    lambda_away = sum(
-        float(value) * (weight / away_weight_sum)
-        for value, weight in away_available
+    # -----------------------------------------------------
+    # SAFETY FLOOR
+    # -----------------------------------------------------
+
+    lambda_home = max(
+        0.01,
+        float(lambda_home),
     )
 
-    return (
-        round(lambda_home, 12),
-        round(lambda_away, 12),
+    lambda_away = max(
+        0.01,
+        float(lambda_away),
     )
+
+    return lambda_home, lambda_away
 
 
 # =========================================================
-# MODEL BUILD
+# BUILD MODEL
 # =========================================================
 
 def build_model(
@@ -172,38 +271,39 @@ def build_model(
     max_goals: int = 10,
 ) -> ModelSnapshot:
     """
-    Q200 V3.1 model oluşturur.
+    Statistics -> LOCKED ModelSnapshot.
 
-    Akış:
+    Pipeline:
 
-        STATISTICS
-            ↓
+        STATS
+          ↓
         LAMBDA
-            ↓
-        POISSON
-            ↓
-        MONTE CARLO
-            ↓
+          ↓
+        POISSON SCORE MATRIX
+          ↓
+        POISSON PROBABILITIES
+          ↓
+        MONTE CARLO 100K
+          ↓
         MODEL SNAPSHOT
-            ↓
-        LOCK
+          ↓
+        LOCK 🔒
 
-    ÖNEMLİ:
+    KRİTİK KURAL:
 
-    Odds bu fonksiyona girmez.
+        Odds bu fonksiyona girmez.
 
-    Dolayısıyla odds model oluşturma aşamasını
-    hiçbir şekilde etkileyemez.
+    Böylece oranların model oluşturma aşamasını
+    etkilemesi mümkün değildir.
     """
+
+    # -----------------------------------------------------
+    # VALIDATION
+    # -----------------------------------------------------
 
     if not isinstance(stats, TeamStats):
         raise TypeError(
             "stats must be an instance of TeamStats"
-        )
-
-    if isinstance(max_goals, bool):
-        raise TypeError(
-            "max_goals integer olmalıdır."
         )
 
     if not isinstance(max_goals, int):
@@ -216,17 +316,18 @@ def build_model(
             "max_goals en az 1 olmalıdır."
         )
 
-    # =====================================================
-    # STEP 1 — LAMBDA
-    # =====================================================
+    # -----------------------------------------------------
+    # STEP 1
+    # -----------------------------------------------------
 
     lambda_home, lambda_away = calculate_lambdas(
         stats
     )
 
-    # =====================================================
-    # STEP 2 — POISSON SCORE MATRIX
-    # =====================================================
+    # -----------------------------------------------------
+    # STEP 2
+    # POISSON SCORE MATRIX
+    # -----------------------------------------------------
 
     score_matrix = poisson_score_matrix(
         lambda_home,
@@ -234,165 +335,42 @@ def build_model(
         max_goals=max_goals,
     )
 
-    # =====================================================
-    # STEP 3 — POISSON PROBABILITIES
-    # =====================================================
+    # -----------------------------------------------------
+    # STEP 3
+    # POISSON MODEL PROBABILITIES
+    # -----------------------------------------------------
 
-    probabilities = {
-        "HOME": sum(
-            score_matrix[h][a]
-            for h in range(max_goals + 1)
-            for a in range(max_goals + 1)
-            if h > a
-        ),
-        "DRAW": sum(
-            score_matrix[h][a]
-            for h in range(max_goals + 1)
-            for a in range(max_goals + 1)
-            if h == a
-        ),
-        "AWAY": sum(
-            score_matrix[h][a]
-            for h in range(max_goals + 1)
-            for a in range(max_goals + 1)
-            if h < a
-        ),
-    }
-
-    # =====================================================
-    # STEP 4 — MONTE CARLO
-    # =====================================================
-
-    monte_carlo_probabilities = simulate_match(
-        lambda_home=lambda_home,
-        lambda_away=lambda_away,
-        iterations=MONTE_CARLO_ITERATIONS,
-        seed=MONTE_CARLO_SEED,
+    probabilities = poisson_match_probabilities(
+        lambda_home,
+        lambda_away,
+        max_goals=max_goals,
     )
 
-    # =====================================================
-    # STEP 5 — MODEL SNAPSHOT
-    # =====================================================
+    # -----------------------------------------------------
+    # STEP 4
+    # MONTE CARLO
+    # -----------------------------------------------------
+
+    monte_carlo = simulate_match(
+        lambda_home,
+        lambda_away,
+        iterations=MONTE_CARLO_ITERATIONS,
+    )
+
+    # -----------------------------------------------------
+    # STEP 5
+    # LOCK MODEL
+    # -----------------------------------------------------
 
     snapshot = ModelSnapshot(
         lambda_home=lambda_home,
         lambda_away=lambda_away,
         probabilities=probabilities,
         score_matrix=score_matrix,
-        monte_carlo_probabilities=(
-            monte_carlo_probabilities
-        ),
-        monte_carlo_iterations=(
-            MONTE_CARLO_ITERATIONS
-        ),
+        monte_carlo_probabilities=monte_carlo,
         max_goals=max_goals,
-        model_version="Q200-V3.1",
+        model_version=MODEL_VERSION,
         locked=True,
     )
 
-    # =====================================================
-    # STEP 6 — LOCK VALIDATION
-    # =====================================================
-
-    if not snapshot.locked:
-        raise RuntimeError(
-            "Q200 model LOCK edilemedi."
-        )
-
-    return snapshot    # xG alanı olarak kullanılır.
-    away_xg = (
-        stats.away_xg
-        if _valid(stats.away_xg)
-        else stats.away_xga
-    )
-
-    away_components = [
-        (stats.away_gf, AWAY_GF_WEIGHT),
-        (stats.home_ga, HOME_GA_WEIGHT),
-        (away_xg, AWAY_XG_WEIGHT),
-        (stats.home_xga, HOME_XGA_WEIGHT),
-    ]
-
-    away_available = [
-        (value, weight)
-        for value, weight in away_components
-        if _valid(value)
-    ]
-
-    if not away_available:
-        raise ValueError(
-            "AWAY lambda için yeterli veri bulunamadı."
-        )
-
-    away_weight_sum = sum(
-        weight for _, weight in away_available
-    )
-
-    lambda_away = sum(
-        float(value) * (weight / away_weight_sum)
-        for value, weight in away_available
-    )
-
-    return (
-        round(lambda_home, 12),
-        round(lambda_away, 12),
-    )
-
-
-# =========================================================
-# MODEL BUILD
-# =========================================================
-
-def build_model(
-    stats: TeamStats,
-    max_goals: int = 10,
-) -> ModelSnapshot:
-    """
-    Model oluşturur ve LOCK eder.
-
-    Odds bu aşamada kullanılmaz.
-    """
-
-    if max_goals < 1:
-        raise ValueError(
-            "max_goals en az 1 olmalıdır."
-        )
-
-    lambda_home, lambda_away = calculate_lambdas(stats)
-
-    score_matrix = poisson_score_matrix(
-        lambda_home,
-        lambda_away,
-        max_goals=max_goals,
-    )
-
-    probabilities = {
-        "HOME": sum(
-            score_matrix[h][a]
-            for h in range(max_goals + 1)
-            for a in range(max_goals + 1)
-            if h > a
-        ),
-        "DRAW": sum(
-            score_matrix[h][a]
-            for h in range(max_goals + 1)
-            for a in range(max_goals + 1)
-            if h == a
-        ),
-        "AWAY": sum(
-            score_matrix[h][a]
-            for h in range(max_goals + 1)
-            for a in range(max_goals + 1)
-            if h < a
-        ),
-    }
-
-    return ModelSnapshot(
-        lambda_home=lambda_home,
-        lambda_away=lambda_away,
-        probabilities=probabilities,
-        score_matrix=score_matrix,
-        max_goals=max_goals,
-        model_version="Q200-V3.1",
-        locked=True,
-    )
+    return snapshot
