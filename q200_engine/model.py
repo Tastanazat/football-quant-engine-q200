@@ -1,74 +1,89 @@
 """
 Q200 Engine - Model Layer
-
-Model oluşturma:
-1. TeamStats verilerinden lambda HOME / AWAY hesaplanır.
-2. Poisson dağılımı oluşturulur.
-3. 1X2 olasılıkları hesaplanır.
-4. Model çıktısı odds'tan bağımsızdır.
-
-Odds bu dosyada KULLANILMAZ.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from math import exp, factorial
 from typing import Any, Dict, Tuple
 
 
-# ---------------------------------------------------------
-# HELPERS
-# ---------------------------------------------------------
+# =========================================================
+# MODEL SNAPSHOT
+# =========================================================
 
-def _get(obj: Any, *names: str, default: float = 0.0) -> float:
+@dataclass
+class ModelSnapshot:
     """
-    TeamStats nesnesinden farklı olası attribute isimlerini okur.
-    Dict desteklenir.
+    Pipeline tarafından kullanılan immutable model çıktısı.
     """
+
+    lambda_home: float
+    lambda_away: float
+    probabilities: Dict[str, float]
+    score_matrix: list
+    max_goals: int = 10
+    locked: bool = True
+
+    @property
+    def model_locked(self) -> bool:
+        return self.locked
+
+
+# =========================================================
+# ATTRIBUTE HELPER
+# =========================================================
+
+def _get(
+    obj: Any,
+    *names: str,
+    default: float = 0.0,
+) -> float:
+
     if isinstance(obj, dict):
         for name in names:
-            if name in obj:
+            if name in obj and obj[name] is not None:
                 return float(obj[name])
+
         return float(default)
 
     for name in names:
         if hasattr(obj, name):
             value = getattr(obj, name)
+
             if value is not None:
                 return float(value)
 
     return float(default)
 
 
-# ---------------------------------------------------------
-# LAMBDA
-# ---------------------------------------------------------
+# =========================================================
+# LAMBDA CALCULATION
+# =========================================================
 
 def calculate_lambdas(stats: Any) -> Tuple[float, float]:
     """
-    Q200 V3.x lambda hesaplaması.
+    Q200 lambda hesaplama.
 
-    FORMÜL:
-
-    HOME =
+    HOME:
         0.35 * Home Home GF
       + 0.35 * Away Away GA
       + 0.15 * Home Home xG
       + 0.15 * Away Away xGA
 
-    AWAY =
+    AWAY:
         0.35 * Away Away GF
       + 0.35 * Home Home GA
       + 0.15 * Away Away xG
       + 0.15 * Home Home xGA
 
-    xG/xGA mevcut değilse ağırlıklar GF/GA tarafına
-    normalize edilir.
+    xG/xGA mevcut değilse GF/GA ağırlıkları normalize edilir.
     """
 
-    # -------------------------
-    # HOME TEAM
-    # -------------------------
+    # -----------------------------------------------------
+    # HOME
+    # -----------------------------------------------------
 
     home_gf = _get(
         stats,
@@ -102,9 +117,9 @@ def calculate_lambdas(stats: Any) -> Tuple[float, float]:
         default=0.0,
     )
 
-    # -------------------------
-    # AWAY TEAM
-    # -------------------------
+    # -----------------------------------------------------
+    # AWAY
+    # -----------------------------------------------------
 
     away_gf = _get(
         stats,
@@ -138,18 +153,26 @@ def calculate_lambdas(stats: Any) -> Tuple[float, float]:
         default=0.0,
     )
 
-    # -------------------------------------------------
-    # xG bilgisi gerçekten mevcut mu?
-    # -------------------------------------------------
+    # -----------------------------------------------------
+    # xG mevcut mu?
+    # -----------------------------------------------------
 
-    xg_available = (
-        home_xg > 0
-        or home_xga > 0
-        or away_xg > 0
-        or away_xga > 0
+    xg_available = any(
+        value > 0
+        for value in (
+            home_xg,
+            home_xga,
+            away_xg,
+            away_xga,
+        )
     )
 
+    # -----------------------------------------------------
+    # WITH xG
+    # -----------------------------------------------------
+
     if xg_available:
+
         lambda_home = (
             0.35 * home_gf
             + 0.35 * away_ga
@@ -164,9 +187,12 @@ def calculate_lambdas(stats: Any) -> Tuple[float, float]:
             + 0.15 * home_xga
         )
 
+    # -----------------------------------------------------
+    # WITHOUT xG
+    # -----------------------------------------------------
+
     else:
-        # xG yoksa 35% + 35% = %70'lik GF/GA ağırlığını
-        # %100'e normalize ediyoruz.
+
         lambda_home = (
             0.50 * home_gf
             + 0.50 * away_ga
@@ -177,33 +203,37 @@ def calculate_lambdas(stats: Any) -> Tuple[float, float]:
             + 0.50 * home_ga
         )
 
-    # Güvenli sınırlar
     lambda_home = max(0.01, float(lambda_home))
     lambda_away = max(0.01, float(lambda_away))
 
     return lambda_home, lambda_away
 
 
-# ---------------------------------------------------------
+# =========================================================
 # POISSON
-# ---------------------------------------------------------
+# =========================================================
 
 def poisson_pmf(k: int, lam: float) -> float:
-    """Poisson olasılığı."""
+
     if k < 0:
         return 0.0
 
-    return exp(-lam) * (lam ** k) / factorial(k)
+    return (
+        exp(-lam)
+        * (lam ** k)
+        / factorial(k)
+    )
 
+
+# =========================================================
+# SCORE MATRIX
+# =========================================================
 
 def build_score_matrix(
     lambda_home: float,
     lambda_away: float,
     max_goals: int = 10,
 ):
-    """
-    Ev sahibi / deplasman skor olasılık matrisi.
-    """
 
     home_probs = [
         poisson_pmf(i, lambda_home)
@@ -217,20 +247,27 @@ def build_score_matrix(
 
     matrix = []
 
-    for h in range(max_goals + 1):
+    for home_goals in range(max_goals + 1):
+
         row = []
 
-        for a in range(max_goals + 1):
-            row.append(home_probs[h] * away_probs[a])
+        for away_goals in range(max_goals + 1):
+
+            probability = (
+                home_probs[home_goals]
+                * away_probs[away_goals]
+            )
+
+            row.append(probability)
 
         matrix.append(row)
 
     return matrix
 
 
-# ---------------------------------------------------------
+# =========================================================
 # 1X2 PROBABILITIES
-# ---------------------------------------------------------
+# =========================================================
 
 def probabilities_from_lambdas(
     lambda_home: float,
@@ -241,7 +278,7 @@ def probabilities_from_lambdas(
     matrix = build_score_matrix(
         lambda_home,
         lambda_away,
-        max_goals=max_goals,
+        max_goals,
     )
 
     home = 0.0
@@ -249,49 +286,49 @@ def probabilities_from_lambdas(
     away = 0.0
 
     for h in range(max_goals + 1):
+
         for a in range(max_goals + 1):
 
-            p = matrix[h][a]
+            probability = matrix[h][a]
 
             if h > a:
-                home += p
+                home += probability
 
             elif h == a:
-                draw += p
+                draw += probability
 
             else:
-                away += p
+                away += probability
 
     total = home + draw + away
 
     if total <= 0:
-        raise ValueError("Model probabilities could not be calculated.")
-
-    home /= total
-    draw /= total
-    away /= total
+        raise ValueError(
+            "Model probabilities could not be calculated."
+        )
 
     return {
-        "HOME": home,
-        "DRAW": draw,
-        "AWAY": away,
+        "HOME": home / total,
+        "DRAW": draw / total,
+        "AWAY": away / total,
     }
 
 
-# ---------------------------------------------------------
-# MODEL BUILDER
-# ---------------------------------------------------------
+# =========================================================
+# BUILD MODEL
+# =========================================================
 
 def build_model(
     stats: Any,
     max_goals: int = 10,
-) -> Dict[str, Any]:
+) -> ModelSnapshot:
     """
-    Stats -> locked model output.
+    Stats -> ModelSnapshot
 
-    ÖNEMLİ:
-    Odds bu fonksiyona girmez.
-    Böylece model odds'tan bağımsız kalır.
+    KRİTİK:
+    Odds burada kullanılmaz.
+
+    Model oluşturulduktan sonra locked=True olur.
     """
 
     lambda_home, lambda_away = calculate_lambdas(stats)
@@ -299,33 +336,33 @@ def build_model(
     probabilities = probabilities_from_lambdas(
         lambda_home,
         lambda_away,
-        max_goals=max_goals,
+        max_goals,
     )
 
     score_matrix = build_score_matrix(
         lambda_home,
         lambda_away,
-        max_goals=max_goals,
+        max_goals,
     )
 
-    return {
-        "lambda_home": lambda_home,
-        "lambda_away": lambda_away,
-        "probabilities": probabilities,
-        "score_matrix": score_matrix,
-        "max_goals": max_goals,
-        "model_locked": True,
-    }
+    return ModelSnapshot(
+        lambda_home=lambda_home,
+        lambda_away=lambda_away,
+        probabilities=probabilities,
+        score_matrix=score_matrix,
+        max_goals=max_goals,
+        locked=True,
+    )
 
 
-# ---------------------------------------------------------
-# BACKWARD COMPATIBILITY
-# ---------------------------------------------------------
+# =========================================================
+# COMPATIBILITY
+# =========================================================
 
-def model_probabilities(stats: Any) -> Dict[str, float]:
-    """
-    Eski kodlar için yardımcı fonksiyon.
-    """
-    model = build_model(stats)
+def model_probabilities(
+    stats: Any,
+) -> Dict[str, float]:
 
-    return model["probabilities"]
+    snapshot = build_model(stats)
+
+    return snapshot.probabilities
