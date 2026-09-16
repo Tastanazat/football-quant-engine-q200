@@ -59,6 +59,11 @@ from .report import (
     report_to_text,
 )
 
+from .history import (
+    HISTORY_SCHEMA_VERSION,
+    AnalysisHistory,
+)
+
 
 __all__ = [
     "TeamStats",
@@ -93,4 +98,7 @@ __all__ = [
     "build_report",
     "report_to_json",
     "report_to_text",
+
+    "HISTORY_SCHEMA_VERSION",
+    "AnalysisHistory",
 ]
