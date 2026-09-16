@@ -10,14 +10,6 @@ import math
 
 import pytest
 
-from q200_engine.analyzer import (
-    run_q200_from_files,
-)
-
-from q200_engine.history import (
-    AnalysisHistory,
-)
-
 from q200_engine.performance import (
     PERFORMANCE_VERSION,
     PerformanceSummary,
@@ -25,98 +17,131 @@ from q200_engine.performance import (
 )
 
 
-def create_csv(
-    path,
-    content,
-):
+class FakeHistory:
+    """
+    Performance katmanını History repository'den
+    izole eden test double.
+    """
 
-    path.write_text(
-        content,
-        encoding="utf-8",
-    )
+    def __init__(
+        self,
+        records,
+    ):
 
+        self.records = records
 
-def create_history_with_result(
-    tmp_path,
-    match_id,
-    home_goals,
-    away_goals,
-):
+    def count(
+        self,
+    ):
 
-    stats1 = (
-        tmp_path
-        / f"{match_id}_statistics_1.csv"
-    )
+        return len(
+            self.records
+        )
 
-    stats2 = (
-        tmp_path
-        / f"{match_id}_statistics_2.csv"
-    )
+    def count_completed(
+        self,
+    ):
 
-    odds = (
-        tmp_path
-        / f"{match_id}_odds.csv"
-    )
+        return sum(
+            1
+            for record in self.records
+            if record.get(
+                "result_recorded"
+            ) is True
+        )
 
-    create_csv(
-        stats1,
-        (
-            "home_gf,home_ga,away_gf\n"
-            "1.80,1.10,1.40\n"
-        ),
-    )
+    def list(
+        self,
+        limit=50,
+    ):
 
-    create_csv(
-        stats2,
-        (
-            "away_ga,home_xg,home_xga,away_xga\n"
-            "1.30,1.75,1.05,1.25\n"
-        ),
-    )
+        return self.records[
+            :limit
+        ]
 
-    create_csv(
-        odds,
-        (
-            "outcome,odds\n"
-            "HOME,2.10\n"
-            "DRAW,3.40\n"
-            "AWAY,3.80\n"
-        ),
-    )
-
-    result = run_q200_from_files(
-        stats1,
-        stats2,
-        odds,
-        bankroll=50_000,
-        uncertainty="LOW",
-    )
-
-    db = (
-        tmp_path
-        / "history.sqlite"
-    )
-
-    history = AnalysisHistory(
-        db
-    )
-
-    record_id = history.save(
-        result,
-        match_id,
-    )
-
-    history.record_result(
+    def get(
+        self,
         record_id,
-        home_goals,
-        away_goals,
-    )
+    ):
 
-    history.settle_record(
-        record_id
-    )
+        for record in self.records:
 
-    return history, record_id
+            if (
+                record["id"]
+                == record_id
+            ):
+
+                return record
+
+        return None
+
+
+def make_record(
+    record_id,
+    *,
+    completed=True,
+    settled=True,
+    selections=None,
+):
+
+    return {
+        "id": record_id,
+
+        "match_id": (
+            f"MATCH-{record_id}"
+        ),
+
+        "result_recorded": (
+            completed
+        ),
+
+        "settlement_recorded": (
+            settled
+        ),
+
+        "settlement": (
+            {
+                "record_id": record_id,
+
+                "match_id": (
+                    f"MATCH-{record_id}"
+                ),
+
+                "home_goals": 2,
+
+                "away_goals": 1,
+
+                "selections": (
+                    selections or []
+                ),
+            }
+            if settled
+            else None
+        ),
+    }
+
+
+def row(
+    outcome,
+    stake,
+    profit,
+):
+
+    return {
+        "outcome": outcome,
+
+        "odds": 2.0,
+
+        "stake": stake,
+
+        "settlement": outcome,
+
+        "profit": profit,
+
+        "home_goals": 2,
+
+        "away_goals": 1,
+    }
 
 
 def test_performance_version():
@@ -127,17 +152,11 @@ def test_performance_version():
     )
 
 
-def test_empty_history_returns_zero_summary(
-    tmp_path,
-):
-
-    history = AnalysisHistory(
-        tmp_path
-        / "history.sqlite"
-    )
+def test_empty_history_returns_zero_summary():
 
     summary = summarize_history(
-        history
+        FakeHistory([]),
+        starting_bankroll=50_000,
     )
 
     assert isinstance(
@@ -207,31 +226,48 @@ def test_empty_history_returns_zero_summary(
 
     assert (
         summary.starting_bankroll
-        == 0.0
+        == 50_000
     )
 
     assert (
         summary.ending_bankroll
+        == 50_000
+    )
+
+    assert (
+        summary.profit
         == 0.0
     )
 
 
-def test_performance_counts_settled_history(
-    tmp_path,
-):
+def test_performance_aggregates_settlement_rows():
 
-    history, _ = (
-        create_history_with_result(
-            tmp_path,
-            "MATCH-001",
-            2,
+    records = [
+        make_record(
             1,
+            selections=[
+                row(
+                    "WIN",
+                    100.0,
+                    100.0,
+                ),
+                row(
+                    "LOSS",
+                    50.0,
+                    -50.0,
+                ),
+                row(
+                    "VOID",
+                    25.0,
+                    0.0,
+                ),
+            ],
         )
-    )
+    ]
 
     summary = summarize_history(
-        history,
-        starting_bankroll=50_000,
+        FakeHistory(records),
+        starting_bankroll=1_000,
     )
 
     assert (
@@ -256,94 +292,67 @@ def test_performance_counts_settled_history(
 
     assert (
         summary.total_bets
-        >= 0
+        == 3
+    )
+
+    assert (
+        summary.wins
+        == 1
+    )
+
+    assert (
+        summary.losses
+        == 1
+    )
+
+    assert (
+        summary.voids
+        == 1
+    )
+
+    assert (
+        summary.total_stake
+        == 175.0
+    )
+
+    assert (
+        summary.total_profit
+        == 50.0
+    )
+
+    assert math.isclose(
+        summary.roi,
+        50.0 / 175.0,
+    )
+
+    assert math.isclose(
+        summary.hit_rate,
+        0.5,
     )
 
     assert (
         summary.starting_bankroll
-        == 50_000
+        == 1_000
     )
 
-    assert math.isclose(
-        summary.ending_bankroll,
-        (
-            50_000
-            + summary.total_profit
-        ),
+    assert (
+        summary.ending_bankroll
+        == 1_050
     )
 
 
-def test_unsettled_completed_match_is_not_counted_as_settled(
-    tmp_path,
-):
+def test_unsettled_completed_match_is_not_counted_as_settled():
 
-    stats1 = (
-        tmp_path
-        / "statistics_1.csv"
-    )
-
-    stats2 = (
-        tmp_path
-        / "statistics_2.csv"
-    )
-
-    odds = (
-        tmp_path
-        / "odds.csv"
-    )
-
-    create_csv(
-        stats1,
-        (
-            "home_gf,home_ga,away_gf\n"
-            "1.80,1.10,1.40\n"
-        ),
-    )
-
-    create_csv(
-        stats2,
-        (
-            "away_ga,home_xg,home_xga,away_xga\n"
-            "1.30,1.75,1.05,1.25\n"
-        ),
-    )
-
-    create_csv(
-        odds,
-        (
-            "outcome,odds\n"
-            "HOME,2.10\n"
-            "DRAW,3.40\n"
-            "AWAY,3.80\n"
-        ),
-    )
-
-    result = run_q200_from_files(
-        stats1,
-        stats2,
-        odds,
-        bankroll=50_000,
-        uncertainty="LOW",
-    )
-
-    history = AnalysisHistory(
-        tmp_path
-        / "history.sqlite"
-    )
-
-    record_id = history.save(
-        result,
-        "MATCH-UNSETTLED",
-    )
-
-    history.record_result(
-        record_id,
-        1,
-        1,
-    )
+    records = [
+        make_record(
+            1,
+            completed=True,
+            settled=False,
+        )
+    ]
 
     summary = summarize_history(
-        history
+        FakeHistory(records)
     )
 
     assert (
@@ -377,193 +386,86 @@ def test_unsettled_completed_match_is_not_counted_as_settled(
     )
 
 
-def test_performance_matches_settlement_rows(
-    tmp_path,
-):
+def test_uncompleted_match_is_not_counted_as_completed():
 
-    history, record_id = (
-        create_history_with_result(
-            tmp_path,
-            "MATCH-ROWS",
-            2,
+    records = [
+        make_record(
             1,
+            completed=False,
+            settled=False,
         )
-    )
-
-    record = history.get(
-        record_id
-    )
-
-    assert record is not None
-
-    settlement = record[
-        "settlement"
     ]
 
-    assert isinstance(
-        settlement,
-        dict,
-    )
-
-    rows = settlement[
-        "selections"
-    ]
-
-    expected_stake = sum(
-        row["stake"]
-        for row in rows
-    )
-
-    expected_profit = sum(
-        row["profit"]
-        for row in rows
-    )
-
-    expected_wins = sum(
-        1
-        for row in rows
-        if row["settlement"]
-        == "WIN"
-    )
-
-    expected_losses = sum(
-        1
-        for row in rows
-        if row["settlement"]
-        == "LOSS"
-    )
-
-    expected_voids = sum(
-        1
-        for row in rows
-        if row["settlement"]
-        == "VOID"
-    )
-
     summary = summarize_history(
-        history
-    )
-
-    assert (
-        summary.total_bets
-        == len(rows)
-    )
-
-    assert (
-        summary.wins
-        == expected_wins
-    )
-
-    assert (
-        summary.losses
-        == expected_losses
-    )
-
-    assert (
-        summary.voids
-        == expected_voids
-    )
-
-    assert math.isclose(
-        summary.total_stake,
-        expected_stake,
-    )
-
-    assert math.isclose(
-        summary.total_profit,
-        expected_profit,
-    )
-
-
-def test_performance_multiple_matches(
-    tmp_path,
-):
-
-    history, first_id = (
-        create_history_with_result(
-            tmp_path,
-            "MATCH-001",
-            2,
-            1,
-        )
-    )
-
-    stats1 = (
-        tmp_path
-        / "second_statistics_1.csv"
-    )
-
-    stats2 = (
-        tmp_path
-        / "second_statistics_2.csv"
-    )
-
-    odds = (
-        tmp_path
-        / "second_odds.csv"
-    )
-
-    create_csv(
-        stats1,
-        (
-            "home_gf,home_ga,away_gf\n"
-            "1.60,1.20,1.50\n"
-        ),
-    )
-
-    create_csv(
-        stats2,
-        (
-            "away_ga,home_xg,home_xga,away_xga\n"
-            "1.10,1.60,1.10,1.20\n"
-        ),
-    )
-
-    create_csv(
-        odds,
-        (
-            "outcome,odds\n"
-            "HOME,2.20\n"
-            "DRAW,3.30\n"
-            "AWAY,3.50\n"
-        ),
-    )
-
-    result = run_q200_from_files(
-        stats1,
-        stats2,
-        odds,
-        bankroll=50_000,
-        uncertainty="LOW",
-    )
-
-    second_id = history.save(
-        result,
-        "MATCH-002",
-    )
-
-    history.record_result(
-        second_id,
-        0,
-        2,
-    )
-
-    history.settle_record(
-        second_id
-    )
-
-    summary = summarize_history(
-        history
+        FakeHistory(records)
     )
 
     assert (
         summary.total_analysis_records
-        == 2
+        == 1
     )
 
     assert (
         summary.completed_matches
-        == 2
+        == 0
+    )
+
+    assert (
+        summary.settled_matches
+        == 0
+    )
+
+    assert (
+        summary.unsettled_completed_matches
+        == 0
+    )
+
+
+def test_multiple_matches_are_aggregated():
+
+    records = [
+        make_record(
+            1,
+            selections=[
+                row(
+                    "WIN",
+                    100.0,
+                    100.0,
+                )
+            ],
+        ),
+
+        make_record(
+            2,
+            selections=[
+                row(
+                    "LOSS",
+                    100.0,
+                    -100.0,
+                )
+            ],
+        ),
+
+        make_record(
+            3,
+            completed=True,
+            settled=False,
+        ),
+    ]
+
+    summary = summarize_history(
+        FakeHistory(records),
+        starting_bankroll=5_000,
+    )
+
+    assert (
+        summary.total_analysis_records
+        == 3
+    )
+
+    assert (
+        summary.completed_matches
+        == 3
     )
 
     assert (
@@ -573,28 +475,82 @@ def test_performance_multiple_matches(
 
     assert (
         summary.unsettled_completed_matches
-        == 0
+        == 1
     )
 
     assert (
         summary.total_bets
-        >= 0
+        == 2
     )
 
     assert (
-        first_id
-        != second_id
+        summary.wins
+        == 1
+    )
+
+    assert (
+        summary.losses
+        == 1
+    )
+
+    assert (
+        summary.voids
+        == 0
+    )
+
+    assert (
+        summary.total_stake
+        == 200.0
+    )
+
+    assert (
+        summary.total_profit
+        == 0.0
+    )
+
+    assert (
+        summary.roi
+        == 0.0
+    )
+
+    assert (
+        summary.hit_rate
+        == 0.5
+    )
+
+    assert (
+        summary.ending_bankroll
+        == 5_000
     )
 
 
-def test_starting_bankroll_validation(
-    tmp_path,
-):
+def test_invalid_settlement_is_rejected():
 
-    history = AnalysisHistory(
-        tmp_path
-        / "history.sqlite"
-    )
+    records = [
+        make_record(
+            1,
+            selections=[
+                row(
+                    "UNKNOWN",
+                    100.0,
+                    0.0,
+                )
+            ],
+        )
+    ]
+
+    with pytest.raises(
+        ValueError
+    ):
+
+        summarize_history(
+            FakeHistory(records)
+        )
+
+
+def test_invalid_bankroll_is_rejected():
+
+    history = FakeHistory([])
 
     with pytest.raises(
         ValueError
@@ -612,4 +568,24 @@ def test_starting_bankroll_validation(
         summarize_history(
             history,
             starting_bankroll="abc",
+        )
+
+    with pytest.raises(
+        TypeError
+    ):
+
+        summarize_history(
+            history,
+            starting_bankroll=True,
+        )
+
+
+def test_invalid_history_is_rejected():
+
+    with pytest.raises(
+        TypeError
+    ):
+
+        summarize_history(
+            None
         )
