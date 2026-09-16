@@ -3,157 +3,67 @@ Q200 Engine - Pipeline
 
 Q200 V3.1
 
-ANA AKIŞ:
+AŞAMA 1:
+Statistics -> Lambda -> Model -> Monte Carlo -> LOCK
 
-Statistics
-    ↓
-Lambda
-    ↓
-Poisson Model
-    ↓
-Monte Carlo
-    ↓
-MODEL LOCK
-    ↓
-Odds
-    ↓
-No-Vig
-    ↓
-Fair Odds / EV / Selection
+AŞAMA 2:
+Odds -> No-Vig -> Fair Odds -> EV -> Selection -> Kelly
 
-KRİTİK KURAL:
-
-Odds, model oluşturulduktan sonra sisteme girer.
-
-Odds hiçbir şekilde:
-- lambda
-- model probabilities
-- score matrix
-- Monte Carlo
-
-değerlerini değiştiremez.
+Odds hiçbir şekilde LOCK edilmiş modeli değiştiremez.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from dataclasses import replace
 
-from .model import (
+from .schema import (
+    TeamStats,
     ModelSnapshot,
-    build_model,
+    AnalysisResult,
 )
-
-from .monte_carlo import (
-    MIN_ITERATIONS,
-    simulate_match,
+from .model import build_model
+from .monte_carlo import simulate_match
+from .odds import (
+    implied_probabilities,
+    fair_odds,
+    expected_value,
 )
+from .selection import select
 
 
 class Q200Pipeline:
-    """
-    Q200 ana pipeline sınıfı.
-
-    Stage 1:
-        Statistics -> Model
-
-    Stage 2:
-        Model -> Monte Carlo
-
-    Stage 3:
-        Locked Model -> Odds
-    """
-
-    # =====================================================
-    # INIT
-    # =====================================================
 
     def __init__(
         self,
-        stats: Any,
-        monte_carlo_iterations: int = MIN_ITERATIONS,
-    ) -> None:
-
-        if monte_carlo_iterations < MIN_ITERATIONS:
-            raise ValueError(
-                "Monte Carlo requires at least "
-                f"{MIN_ITERATIONS} iterations."
-            )
+        stats: TeamStats,
+        max_goals: int = 10,
+    ):
 
         self.stats = stats
 
-        self.monte_carlo_iterations = (
-            monte_carlo_iterations
+        self.snapshot = build_model(
+            stats,
+            max_goals=max_goals,
         )
 
-        # -------------------------------------------------
-        # MODEL
-        # -------------------------------------------------
-
-        self.snapshot: ModelSnapshot = build_model(
-            stats
-        )
-
-        # -------------------------------------------------
-        # MONTE CARLO
-        # -------------------------------------------------
-
-        self.monte_carlo_probabilities = (
-            simulate_match(
-                self.snapshot.lambda_home,
-                self.snapshot.lambda_away,
-                iterations=monte_carlo_iterations,
+        if not self.snapshot.locked:
+            raise RuntimeError(
+                "Model LOCK edilemedi."
             )
-        )
-
-        # -------------------------------------------------
-        # LOCK
-        # -------------------------------------------------
-
-        self._model_locked = True
-
-        # Odds analysis sonucu
-        self.analysis_result: Optional[Any] = None
 
     # =====================================================
-    # MODEL LOCK
+    # MODEL
     # =====================================================
 
-    @property
-    def model_locked(self) -> bool:
-        """
-        Modelin LOCK durumunu döndürür.
-        """
+    def run_monte_carlo(
+        self,
+        iterations: int = 100_000,
+    ):
 
-        return self._model_locked
-
-    # =====================================================
-    # MODEL PROBABILITIES
-    # =====================================================
-
-    @property
-    def model_probabilities(self) -> Dict[str, float]:
-        """
-        LOCK edilmiş Poisson model olasılıkları.
-
-        Odds tarafından değiştirilemez.
-        """
-
-        return dict(
-            self.snapshot.probabilities
-        )
-
-    # =====================================================
-    # MONTE CARLO PROBABILITIES
-    # =====================================================
-
-    @property
-    def monte_carlo(self) -> Dict[str, float]:
-        """
-        Monte Carlo sonuçlarını döndürür.
-        """
-
-        return dict(
-            self.monte_carlo_probabilities
+        return simulate_match(
+            self.snapshot.lambda_home,
+            self.snapshot.lambda_away,
+            iterations=iterations,
         )
 
     # =====================================================
@@ -162,115 +72,51 @@ class Q200Pipeline:
 
     def analyze_odds(
         self,
-        odds: Dict[str, float],
+        odds: dict[str, float],
         bankroll: float,
         uncertainty: str = "MEDIUM",
-    ) -> Any:
-        """
-        Locked model üzerinde odds analizi başlatır.
+    ) -> AnalysisResult:
 
-        KRİTİK:
+        # LOCK edilmiş snapshot'ın kopyasını al.
+        locked_snapshot = self.snapshot
 
-        Bu fonksiyon:
-        - lambda değiştiremez
-        - model probability değiştiremez
-        - score matrix değiştiremez
-        - Monte Carlo sonucunu değiştiremez
-
-        Odds sadece sonraki aşamalarda kullanılır.
-        """
-
-        if not self._model_locked:
-            raise RuntimeError(
-                "Model must be locked before odds analysis."
-            )
-
-        # -------------------------------------------------
-        # SNAPSHOT BEFORE
-        # -------------------------------------------------
-
-        snapshot_before = self.snapshot
-
-        # -------------------------------------------------
-        # ODDS
-        # -------------------------------------------------
-
-        from .odds import implied_probabilities
-
+        # Odds sadece burada kullanılır.
         no_vig = implied_probabilities(
             odds
         )
 
-        # -------------------------------------------------
-        # FAIR ODDS
-        # -------------------------------------------------
-
-        fair_odds = {}
-
-        for outcome, probability in (
-            self.snapshot.probabilities.items()
-        ):
-
-            if probability <= 0:
-
-                fair_odds[outcome] = float("inf")
-
-            else:
-
-                fair_odds[outcome] = (
-                    1.0 / probability
-                )
-
-        # -------------------------------------------------
-        # EV
-        # -------------------------------------------------
+        fair = fair_odds(
+            locked_snapshot.probabilities
+        )
 
         ev = {}
 
-        for outcome, probability in (
-            self.snapshot.probabilities.items()
-        ):
+        for outcome, odd in odds.items():
 
-            if outcome not in odds:
-                continue
+            if outcome in locked_snapshot.probabilities:
 
-            odd = float(odds[outcome])
+                ev[outcome] = expected_value(
+                    locked_snapshot.probabilities[outcome],
+                    odd,
+                )
 
-            ev[outcome] = (
-                probability * odd
-            ) - 1.0
+        selections = select(
+            locked_snapshot.probabilities,
+            odds,
+            bankroll,
+            uncertainty=uncertainty,
+        )
 
-        # -------------------------------------------------
-        # RESULT
-        # -------------------------------------------------
-
-        result = {
-            "snapshot": snapshot_before,
-            "model_probabilities": dict(
-                self.snapshot.probabilities
-            ),
-            "monte_carlo_probabilities": dict(
-                self.monte_carlo_probabilities
-            ),
-            "no_vig_probabilities": no_vig,
-            "fair_odds": fair_odds,
-            "ev": ev,
-            "odds": dict(odds),
-            "bankroll": float(bankroll),
-            "uncertainty": uncertainty,
-        }
-
-        # -------------------------------------------------
-        # INTEGRITY CHECK
-        # -------------------------------------------------
-
-        if self.snapshot != snapshot_before:
-
+        # Modelin değişmediğini garanti et.
+        if locked_snapshot != self.snapshot:
             raise RuntimeError(
-                "MODEL LOCK VIOLATION: "
-                "Odds changed the model snapshot."
+                "CRITICAL: Odds model snapshot'ını değiştirdi."
             )
 
-        self.analysis_result = result
-
-        return result
+        return AnalysisResult(
+            snapshot=locked_snapshot,
+            fair_odds=fair,
+            no_vig_probabilities=no_vig,
+            ev=ev,
+            selections=selections,
+        )
