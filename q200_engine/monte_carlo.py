@@ -1,36 +1,154 @@
+"""
+Q200 Engine - Monte Carlo Layer
+
+Stage 2:
+Model -> Monte Carlo
+
+KRİTİK KURALLAR:
+- Odds kullanılmaz.
+- Minimum 100.000 iterasyon.
+- Lambda negatif olamaz.
+- Sonuçlar HOME / DRAW / AWAY olarak döner.
+"""
+
+from __future__ import annotations
+
+import math
 import random
+from typing import Dict
 
 
-def simulate_match(lambda_home, lambda_away, iterations=100_000, seed=200):
-    if iterations < 100_000:
-        raise ValueError("Q200 requires at least 100,000 Monte Carlo iterations")
+MIN_ITERATIONS = 100_000
 
-    rng = random.Random(seed)
 
-    def poisson_sample(lam):
-        # Knuth sampler; sufficient for the compact Q200 engine.
-        l = pow(2.718281828459045, -lam)
-        k, p = 0, 1.0
-        while p > l:
-            k += 1
-            p *= rng.random()
-        return k - 1
+def _sample_poisson(lam: float) -> int:
+    """
+    Poisson dağılımından tek örnek üretir.
 
-    h = d = a = 0
+    NumPy kullanılmaz.
+    """
+
+    if lam < 0:
+        raise ValueError(
+            "Lambda cannot be negative."
+        )
+
+    # Knuth algorithm
+    limit = math.exp(-lam)
+
+    k = 0
+    product = 1.0
+
+    while product > limit:
+        k += 1
+        product *= random.random()
+
+    return k - 1
+
+
+def simulate_match(
+    lambda_home: float,
+    lambda_away: float,
+    iterations: int = MIN_ITERATIONS,
+) -> Dict[str, float]:
+    """
+    Monte Carlo maç simülasyonu.
+
+    Parameters
+    ----------
+    lambda_home:
+        Home takım gol beklentisi.
+
+    lambda_away:
+        Away takım gol beklentisi.
+
+    iterations:
+        Simülasyon sayısı.
+        Minimum 100.000 olmalıdır.
+
+    Returns
+    -------
+    Dict[str, float]
+        HOME / DRAW / AWAY olasılıkları.
+    """
+
+    # -----------------------------------------------------
+    # VALIDATION
+    # -----------------------------------------------------
+
+    if iterations < MIN_ITERATIONS:
+        raise ValueError(
+            "Monte Carlo requires at least "
+            f"{MIN_ITERATIONS} iterations."
+        )
+
+    if lambda_home < 0:
+        raise ValueError(
+            "lambda_home cannot be negative."
+        )
+
+    if lambda_away < 0:
+        raise ValueError(
+            "lambda_away cannot be negative."
+        )
+
+    # -----------------------------------------------------
+    # COUNTERS
+    # -----------------------------------------------------
+
+    home_wins = 0
+    draws = 0
+    away_wins = 0
+
+    # -----------------------------------------------------
+    # SIMULATION
+    # -----------------------------------------------------
+
     for _ in range(iterations):
-        hg = poisson_sample(lambda_home)
-        ag = poisson_sample(lambda_away)
-        if hg > ag:
-            h += 1
-        elif hg == ag:
-            d += 1
-        else:
-            a += 1
 
-    return {
-        "HOME": h / iterations,
-        "DRAW": d / iterations,
-        "AWAY": a / iterations,
-        "iterations": iterations,
-        "seed": seed,
+        home_goals = _sample_poisson(
+            lambda_home
+        )
+
+        away_goals = _sample_poisson(
+            lambda_away
+        )
+
+        if home_goals > away_goals:
+
+            home_wins += 1
+
+        elif home_goals == away_goals:
+
+            draws += 1
+
+        else:
+
+            away_wins += 1
+
+    # -----------------------------------------------------
+    # TOTAL
+    # -----------------------------------------------------
+
+    total = (
+        home_wins
+        + draws
+        + away_wins
+    )
+
+    if total <= 0:
+        raise RuntimeError(
+            "Monte Carlo produced no valid simulations."
+        )
+
+    # -----------------------------------------------------
+    # PROBABILITIES
+    # -----------------------------------------------------
+
+    probabilities = {
+        "HOME": home_wins / total,
+        "DRAW": draws / total,
+        "AWAY": away_wins / total,
     }
+
+    return probabilities
