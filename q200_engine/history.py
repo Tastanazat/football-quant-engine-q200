@@ -9,8 +9,8 @@ Bu katman:
 - Model hesabı yapmaz.
 - Odds hesabı yapmaz.
 - Selection değiştirmez.
-- Kayıtlı raporu değiştirmez.
-- Sadece AnalysisResult -> report -> SQLite geçmişi sağlar.
+- Kayıtlı analiz verisini değiştirmez.
+- Maç sonucu sonradan geldiğinde sonucu History kaydına ekler.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from typing import Any
 from .report import build_report
 
 
-HISTORY_SCHEMA_VERSION = "Q200-HISTORY-V1"
+HISTORY_SCHEMA_VERSION = "Q200-HISTORY-V2"
 
 
 def _validate_text(
@@ -50,7 +50,37 @@ def _validate_text(
     return result
 
 
+def _validate_goals(
+    value: Any,
+    name: str,
+) -> int:
+
+    if isinstance(
+        value,
+        bool,
+    ):
+        raise TypeError(
+            f"{name} integer olmalıdır."
+        )
+
+    if not isinstance(
+        value,
+        int,
+    ):
+        raise TypeError(
+            f"{name} integer olmalıdır."
+        )
+
+    if value < 0:
+        raise ValueError(
+            f"{name} negatif olamaz."
+        )
+
+    return value
+
+
 def _utc_now() -> str:
+
     return datetime.now(
         timezone.utc
     ).isoformat()
@@ -112,12 +142,70 @@ class AnalysisHistory:
                     created_at TEXT NOT NULL,
                     report_version TEXT NOT NULL,
                     model_version TEXT NOT NULL,
-                    report_json TEXT NOT NULL
+                    report_json TEXT NOT NULL,
+                    result_recorded INTEGER NOT NULL DEFAULT 0,
+                    home_goals INTEGER,
+                    away_goals INTEGER,
+                    result_recorded_at TEXT
                 )
                 """
             )
 
+            self._ensure_column(
+                connection,
+                "result_recorded",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+
+            self._ensure_column(
+                connection,
+                "home_goals",
+                "INTEGER",
+            )
+
+            self._ensure_column(
+                connection,
+                "away_goals",
+                "INTEGER",
+            )
+
+            self._ensure_column(
+                connection,
+                "result_recorded_at",
+                "TEXT",
+            )
+
             connection.commit()
+
+    @staticmethod
+    def _ensure_column(
+        connection: sqlite3.Connection,
+        column_name: str,
+        column_definition: str,
+    ) -> None:
+
+        columns = connection.execute(
+            """
+            PRAGMA table_info(
+                analysis_history
+            )
+            """
+        ).fetchall()
+
+        existing_columns = {
+            row["name"]
+            for row in columns
+        }
+
+        if column_name not in existing_columns:
+
+            connection.execute(
+                f"""
+                ALTER TABLE analysis_history
+                ADD COLUMN {column_name}
+                {column_definition}
+                """
+            )
 
     def save(
         self,
@@ -155,9 +243,13 @@ class AnalysisHistory:
                     created_at,
                     report_version,
                     model_version,
-                    report_json
+                    report_json,
+                    result_recorded,
+                    home_goals,
+                    away_goals,
+                    result_recorded_at
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, 0, NULL, NULL, NULL)
                 """,
                 (
                     match_id,
@@ -172,6 +264,75 @@ class AnalysisHistory:
 
             return int(
                 cursor.lastrowid
+            )
+
+    def record_result(
+        self,
+        record_id: int,
+        home_goals: int,
+        away_goals: int,
+    ) -> bool:
+        """
+        Kayıtlı analize maç sonucunu ekler.
+
+        Örnek:
+
+            HOME 2
+            AWAY 1
+
+        Sonuç daha önce kaydedilmişse mevcut sonuç
+        yeni sonuçla güncellenir.
+        """
+
+        if not isinstance(
+            record_id,
+            int,
+        ):
+            raise TypeError(
+                "record_id integer olmalıdır."
+            )
+
+        if record_id <= 0:
+            raise ValueError(
+                "record_id pozitif olmalıdır."
+            )
+
+        home_goals = _validate_goals(
+            home_goals,
+            "home_goals",
+        )
+
+        away_goals = _validate_goals(
+            away_goals,
+            "away_goals",
+        )
+
+        recorded_at = _utc_now()
+
+        with self._connect() as connection:
+
+            cursor = connection.execute(
+                """
+                UPDATE analysis_history
+                SET
+                    result_recorded = 1,
+                    home_goals = ?,
+                    away_goals = ?,
+                    result_recorded_at = ?
+                WHERE id = ?
+                """,
+                (
+                    home_goals,
+                    away_goals,
+                    recorded_at,
+                    record_id,
+                ),
+            )
+
+            connection.commit()
+
+            return (
+                cursor.rowcount == 1
             )
 
     def get(
@@ -205,7 +366,11 @@ class AnalysisHistory:
                     created_at,
                     report_version,
                     model_version,
-                    report_json
+                    report_json,
+                    result_recorded,
+                    home_goals,
+                    away_goals,
+                    result_recorded_at
                 FROM analysis_history
                 WHERE id = ?
                 """,
@@ -226,6 +391,18 @@ class AnalysisHistory:
             "report": json.loads(
                 row["report_json"]
             ),
+            "result_recorded": bool(
+                row["result_recorded"]
+            ),
+            "home_goals": row[
+                "home_goals"
+            ],
+            "away_goals": row[
+                "away_goals"
+            ],
+            "result_recorded_at": row[
+                "result_recorded_at"
+            ],
         }
 
     def list(
@@ -258,7 +435,11 @@ class AnalysisHistory:
                     match_id,
                     created_at,
                     report_version,
-                    model_version
+                    model_version,
+                    result_recorded,
+                    home_goals,
+                    away_goals,
+                    result_recorded_at
                 FROM analysis_history
                 ORDER BY id DESC
                 LIMIT ?
@@ -273,8 +454,24 @@ class AnalysisHistory:
                 "id": row["id"],
                 "match_id": row["match_id"],
                 "created_at": row["created_at"],
-                "report_version": row["report_version"],
-                "model_version": row["model_version"],
+                "report_version": row[
+                    "report_version"
+                ],
+                "model_version": row[
+                    "model_version"
+                ],
+                "result_recorded": bool(
+                    row["result_recorded"]
+                ),
+                "home_goals": row[
+                    "home_goals"
+                ],
+                "away_goals": row[
+                    "away_goals"
+                ],
+                "result_recorded_at": row[
+                    "result_recorded_at"
+                ],
             }
             for row in rows
         ]
@@ -299,14 +496,34 @@ class AnalysisHistory:
             row["count"]
         )
 
+    def count_completed(
+        self,
+    ) -> int:
+        """
+        Sonucu kaydedilmiş analizlerin
+        toplam sayısını döndürür.
+        """
+
+        with self._connect() as connection:
+
+            row = connection.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM analysis_history
+                WHERE result_recorded = 1
+                """
+            ).fetchone()
+
+        return int(
+            row["count"]
+        )
+
     def delete(
         self,
         record_id: int,
     ) -> bool:
         """
         Bir geçmiş kaydını siler.
-
-        Başarılıysa True döner.
         """
 
         if not isinstance(
