@@ -9,6 +9,14 @@ from q200_engine.selection import select
 from q200_engine.kelly import quarter_kelly
 from q200_engine.pipeline import Q200Pipeline
 
+from q200_engine.backtest import (
+    settle_market,
+    calculate_profit,
+    settle_bet,
+    BacktestEngine,
+    run_backtest,
+)
+
 
 # =========================================================
 # LAMBDA
@@ -593,3 +601,429 @@ def test_very_high_uncertainty_never_produces_stake():
         assert row["eligible"] is False
         assert row["stake"] == 0.0
         assert row["quarter_kelly"] == 0.0
+
+
+# =========================================================
+# BACKTEST - 1X2
+# =========================================================
+
+def test_backtest_home_win():
+
+    result = settle_market(
+        "HOME",
+        2,
+        1,
+    )
+
+    assert result == "WIN"
+
+
+def test_backtest_home_loss():
+
+    result = settle_market(
+        "HOME",
+        0,
+        2,
+    )
+
+    assert result == "LOSS"
+
+
+def test_backtest_draw():
+
+    result = settle_market(
+        "DRAW",
+        1,
+        1,
+    )
+
+    assert result == "WIN"
+
+
+def test_backtest_away_win():
+
+    result = settle_market(
+        "AWAY",
+        0,
+        2,
+    )
+
+    assert result == "WIN"
+
+
+# =========================================================
+# BACKTEST - TOTAL GOALS
+# =========================================================
+
+def test_backtest_over_2_5():
+
+    result = settle_market(
+        "OVER_2.5",
+        2,
+        1,
+    )
+
+    assert result == "WIN"
+
+
+def test_backtest_under_2_5():
+
+    result = settle_market(
+        "UNDER_2.5",
+        1,
+        1,
+    )
+
+    assert result == "WIN"
+
+
+def test_backtest_over_2_5_loss():
+
+    result = settle_market(
+        "OVER_2.5",
+        1,
+        1,
+    )
+
+    assert result == "LOSS"
+
+
+def test_backtest_under_2_5_loss():
+
+    result = settle_market(
+        "UNDER_2.5",
+        2,
+        1,
+    )
+
+    assert result == "LOSS"
+
+
+# =========================================================
+# BACKTEST - BTTS
+# =========================================================
+
+def test_backtest_btts_yes():
+
+    result = settle_market(
+        "BTTS_YES",
+        2,
+        1,
+    )
+
+    assert result == "WIN"
+
+
+def test_backtest_btts_no():
+
+    result = settle_market(
+        "BTTS_NO",
+        0,
+        2,
+    )
+
+    assert result == "WIN"
+
+
+def test_backtest_btts_yes_loss():
+
+    result = settle_market(
+        "BTTS_YES",
+        2,
+        0,
+    )
+
+    assert result == "LOSS"
+
+
+def test_backtest_btts_no_loss():
+
+    result = settle_market(
+        "BTTS_NO",
+        2,
+        1,
+    )
+
+    assert result == "LOSS"
+
+
+# =========================================================
+# BACKTEST - CORRECT SCORE
+# =========================================================
+
+def test_backtest_correct_score():
+
+    result = settle_market(
+        "2-1",
+        2,
+        1,
+    )
+
+    assert result == "WIN"
+
+
+def test_backtest_correct_score_loss():
+
+    result = settle_market(
+        "2-1",
+        1,
+        1,
+    )
+
+    assert result == "LOSS"
+
+
+# =========================================================
+# BACKTEST - PROFIT
+# =========================================================
+
+def test_backtest_profit_win():
+
+    profit = calculate_profit(
+        "WIN",
+        100.0,
+        2.0,
+    )
+
+    assert profit == 100.0
+
+
+def test_backtest_profit_loss():
+
+    profit = calculate_profit(
+        "LOSS",
+        100.0,
+        2.0,
+    )
+
+    assert profit == -100.0
+
+
+def test_backtest_profit_void():
+
+    profit = calculate_profit(
+        "VOID",
+        100.0,
+        2.0,
+    )
+
+    assert profit == 0.0
+
+
+# =========================================================
+# BACKTEST - SINGLE BET
+# =========================================================
+
+def test_backtest_settle_bet():
+
+    result = settle_bet(
+        outcome="HOME",
+        odds=2.0,
+        stake=100.0,
+        home_goals=2,
+        away_goals=1,
+    )
+
+    assert result.settlement == "WIN"
+    assert result.profit == 100.0
+    assert result.stake == 100.0
+    assert result.outcome == "HOME"
+
+
+# =========================================================
+# BACKTEST - ENGINE SUMMARY
+# =========================================================
+
+def test_backtest_engine_summary():
+
+    engine = BacktestEngine(
+        starting_bankroll=1000.0
+    )
+
+    engine.add_bet(
+        outcome="HOME",
+        odds=2.0,
+        stake=100.0,
+        home_goals=2,
+        away_goals=1,
+    )
+
+    engine.add_bet(
+        outcome="HOME",
+        odds=2.0,
+        stake=100.0,
+        home_goals=0,
+        away_goals=1,
+    )
+
+    summary = engine.summary()
+
+    assert summary.total_bets == 2
+    assert summary.wins == 1
+    assert summary.losses == 1
+    assert summary.voids == 0
+
+    assert summary.total_stake == 200.0
+    assert summary.total_profit == 0.0
+
+    assert summary.roi == 0.0
+    assert summary.hit_rate == 0.5
+
+    assert summary.starting_bankroll == 1000.0
+    assert summary.ending_bankroll == 1000.0
+
+
+# =========================================================
+# BACKTEST - NON ELIGIBLE SELECTION
+# =========================================================
+
+def test_backtest_only_eligible_selection():
+
+    engine = BacktestEngine()
+
+    selection = {
+        "outcome": "HOME",
+        "probability": 0.60,
+        "odds": 2.0,
+        "ev": 0.20,
+        "eligible": False,
+        "stake": 0.0,
+    }
+
+    result = engine.add_selection(
+        selection,
+        home_goals=2,
+        away_goals=1,
+    )
+
+    assert result is None
+    assert len(engine.records) == 0
+
+
+# =========================================================
+# BACKTEST - ELIGIBLE SELECTION
+# =========================================================
+
+def test_backtest_eligible_selection():
+
+    engine = BacktestEngine()
+
+    selection = {
+        "outcome": "HOME",
+        "probability": 0.60,
+        "odds": 2.0,
+        "ev": 0.20,
+        "eligible": True,
+        "stake": 100.0,
+    }
+
+    result = engine.add_selection(
+        selection,
+        home_goals=2,
+        away_goals=1,
+    )
+
+    assert result is not None
+    assert result.settlement == "WIN"
+    assert result.profit == 100.0
+
+
+# =========================================================
+# BACKTEST - BATCH
+# =========================================================
+
+def test_run_backtest():
+
+    selections = [
+        {
+            "outcome": "HOME",
+            "odds": 2.0,
+            "stake": 100.0,
+            "eligible": True,
+        },
+        {
+            "outcome": "DRAW",
+            "odds": 3.5,
+            "stake": 100.0,
+            "eligible": True,
+        },
+    ]
+
+    summary = run_backtest(
+        selections,
+        home_goals=2,
+        away_goals=1,
+        starting_bankroll=1000.0,
+    )
+
+    assert summary.total_bets == 2
+    assert summary.wins == 1
+    assert summary.losses == 1
+    assert summary.voids == 0
+
+    # HOME 2.00 kazanır: +100
+    # DRAW 3.50 kaybeder: -100
+    # Toplam: 0
+    assert summary.total_profit == 0.0
+
+    assert summary.total_stake == 200.0
+    assert summary.roi == 0.0
+    assert summary.hit_rate == 0.5
+    assert summary.ending_bankroll == 1000.0
+
+
+# =========================================================
+# BACKTEST - VALIDATION
+# =========================================================
+
+def test_backtest_rejects_negative_goals():
+
+    with pytest.raises(ValueError):
+
+        settle_market(
+            "HOME",
+            -1,
+            0,
+        )
+
+
+def test_backtest_rejects_invalid_market():
+
+    with pytest.raises(ValueError):
+
+        settle_market(
+            "INVALID_MARKET",
+            1,
+            0,
+        )
+
+
+def test_backtest_rejects_invalid_odds():
+
+    with pytest.raises(ValueError):
+
+        calculate_profit(
+            "WIN",
+            100.0,
+            1.0,
+        )
+
+
+def test_backtest_rejects_negative_stake():
+
+    with pytest.raises(ValueError):
+
+        calculate_profit(
+            "WIN",
+            -100.0,
+            2.0,
+        )
+
+
+def test_backtest_rejects_negative_starting_bankroll():
+
+    with pytest.raises(ValueError):
+
+        BacktestEngine(
+            starting_bankroll=-100.0
+        )
