@@ -425,7 +425,7 @@ class BacktestSummary:
         Eski kullanım:
             summary.profit
 
-        Yeni canonical alan:
+        Canonical alan:
             summary.total_profit
         """
 
@@ -462,7 +462,6 @@ class BacktestEngine:
             BacktestRecord
         ] = []
 
-
     # =====================================================
     # ADD BET
     # =====================================================
@@ -490,7 +489,6 @@ class BacktestEngine:
 
         return record
 
-
     # =====================================================
     # ADD SELECTION
     # =====================================================
@@ -511,14 +509,17 @@ class BacktestEngine:
                 "selection dictionary olmalıdır."
             )
 
-        eligible = bool(
-            selection.get(
-                "eligible",
-                False,
-            )
-        )
+        # -------------------------------------------------
+        # Eğer eligible açıkça False ise seçim yapılmaz.
+        #
+        # Eğer eligible alanı hiç yoksa, kayıt doğrudan
+        # backtest bahsi olarak kabul edilir.
+        # -------------------------------------------------
 
-        if not eligible:
+        if (
+            "eligible" in selection
+            and selection["eligible"] is False
+        ):
 
             return None
 
@@ -547,7 +548,6 @@ class BacktestEngine:
             home_goals=home_goals,
             away_goals=away_goals,
         )
-
 
     # =====================================================
     # SUMMARY
@@ -650,42 +650,36 @@ def run_backtest(
     """
     Birden fazla seçimi backtest eder.
 
-    İki kullanım desteklenir.
+    Kullanım 1:
 
-    ---------------------------------------------------------
-    1. Ortak maç skoru
-    ---------------------------------------------------------
+        run_backtest(
+            selections,
+            home_goals=2,
+            away_goals=1,
+        )
 
-    run_backtest(
-        selections,
-        home_goals=2,
-        away_goals=1,
-    )
+    Tüm selections aynı maç skoruyla settle edilir.
 
-    Bu kullanımda tüm selections aynı maç skoruyla
-    settle edilir.
+    Kullanım 2:
 
-    ---------------------------------------------------------
-    2. Her selection kendi maç skorunu taşır
-    ---------------------------------------------------------
+        run_backtest(
+            [
+                {
+                    "outcome": "HOME",
+                    "odds": 2.00,
+                    "stake": 100,
+                    "home_goals": 2,
+                    "away_goals": 1,
+                }
+            ]
+        )
 
-    run_backtest(
-        [
-            {
-                "outcome": "HOME",
-                "odds": 2.00,
-                "stake": 100,
-                "home_goals": 2,
-                "away_goals": 1,
-                "eligible": True,
-            }
-        ]
-    )
+    Her selection kendi maç skorunu taşır.
 
-    Bu kullanımda her selection içindeki
-    home_goals / away_goals kullanılır.
+    `eligible` alanı yoksa kayıt doğrudan bahis
+    olarak kabul edilir.
 
-    Böylece eski ve yeni API birlikte korunur.
+    `eligible=False` ise kayıt backtest'e alınmaz.
     """
 
     if home_goals is not None:
@@ -728,7 +722,7 @@ def run_backtest(
             )
 
         # -------------------------------------------------
-        # Ortak maç skoru verilmişse onu kullan.
+        # Ortak maç skoru
         # -------------------------------------------------
 
         if (
@@ -745,7 +739,7 @@ def run_backtest(
             )
 
         # -------------------------------------------------
-        # Ortak skor yoksa selection içinden al.
+        # Selection kendi maç skorunu taşıyor
         # -------------------------------------------------
 
         else:
