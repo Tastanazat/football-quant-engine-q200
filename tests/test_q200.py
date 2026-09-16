@@ -3,17 +3,21 @@ import pytest
 from q200_engine.schema import TeamStats
 from q200_engine.model import calculate_lambdas, build_model
 from q200_engine.poisson_model import poisson_match_probabilities
-from q200_engine.monte_carlo import simulate_match
+from q200_engine.monte_carlo import (
+    simulate_match,
+    MIN_ITERATIONS,
+)
 from q200_engine.odds import implied_probabilities
 from q200_engine.selection import select
 from q200_engine.kelly import quarter_kelly
 
 
 # =========================================================
-# LAMBDA FORMULA
+# LAMBDA
 # =========================================================
 
 def test_lambda_formula():
+
     s = TeamStats(
         2.0,
         1.2,
@@ -26,24 +30,16 @@ def test_lambda_formula():
 
     h, a = calculate_lambdas(s)
 
-    # Q200 V3.1
-    # HOME:
-    # 0.35*2.0 + 0.35*1.8 + 0.15*1.1 + 0.15*1.4
-    # = 1.705
     assert h == pytest.approx(1.705)
-
-    # Legacy 7-parametreli TeamStats yapısında
-    # AWAY lambda:
-    # 0.35*1.5 + 0.35*1.2 + 0.15*1.0
-    # = 1.095
     assert a == pytest.approx(1.095)
 
 
 # =========================================================
-# PROBABILITIES
+# POISSON PROBABILITIES
 # =========================================================
 
 def test_probabilities_sum_to_one():
+
     p = poisson_match_probabilities(
         1.5,
         1.1,
@@ -60,6 +56,7 @@ def test_probabilities_sum_to_one():
 # =========================================================
 
 def test_model_is_locked():
+
     s = TeamStats(
         2,
         1,
@@ -72,11 +69,13 @@ def test_model_is_locked():
 
 
 # =========================================================
-# MONTE CARLO
+# MONTE CARLO MINIMUM
 # =========================================================
 
 def test_monte_carlo_minimum():
+
     with pytest.raises(ValueError):
+
         simulate_match(
             1.2,
             1.0,
@@ -85,10 +84,61 @@ def test_monte_carlo_minimum():
 
 
 # =========================================================
+# MONTE CARLO SUM
+# =========================================================
+
+def test_monte_carlo_probabilities_sum_to_one():
+
+    p = simulate_match(
+        1.5,
+        1.1,
+        iterations=MIN_ITERATIONS,
+    )
+
+    assert sum(p.values()) == pytest.approx(
+        1.0,
+        abs=1e-12,
+    )
+
+
+# =========================================================
+# MONTE CARLO RANGE
+# =========================================================
+
+def test_monte_carlo_returns_valid_probabilities():
+
+    p = simulate_match(
+        1.5,
+        1.1,
+        iterations=MIN_ITERATIONS,
+    )
+
+    assert 0.0 <= p["HOME"] <= 1.0
+    assert 0.0 <= p["DRAW"] <= 1.0
+    assert 0.0 <= p["AWAY"] <= 1.0
+
+
+# =========================================================
+# MONTE CARLO NEGATIVE LAMBDA
+# =========================================================
+
+def test_monte_carlo_rejects_negative_lambda():
+
+    with pytest.raises(ValueError):
+
+        simulate_match(
+            -1.0,
+            1.1,
+            iterations=MIN_ITERATIONS,
+        )
+
+
+# =========================================================
 # NO-VIG
 # =========================================================
 
 def test_no_vig_sums_to_one():
+
     p = implied_probabilities(
         {
             "HOME": 2.0,
@@ -97,7 +147,9 @@ def test_no_vig_sums_to_one():
         }
     )
 
-    assert sum(p.values()) == pytest.approx(1.0)
+    assert sum(p.values()) == pytest.approx(
+        1.0
+    )
 
 
 # =========================================================
@@ -105,7 +157,190 @@ def test_no_vig_sums_to_one():
 # =========================================================
 
 def test_quarter_kelly_respects_two_percent_cap():
+
     result = quarter_kelly(
+        0.70,
+        2.0,
+        50_000,
+    )
+
+    assert result["stake"] <= 1000
+
+
+# =========================================================
+# MINIMUM ODDS
+# =========================================================
+
+def test_minimum_odds_filter():
+
+    with pytest.raises(ValueError):
+
+        select(
+            {
+                "HOME": 0.60,
+                "DRAW": 0.20,
+                "AWAY": 0.20,
+            },
+            {
+                "HOME": 1.40,
+                "DRAW": 4.0,
+                "AWAY": 5.0,
+            },
+            50_000,
+        )
+
+
+# =========================================================
+# EV SELECTION
+# =========================================================
+
+def test_ev_can_create_eligible_selection():
+
+    rows = select(
+        {
+            "HOME": 0.60,
+            "DRAW": 0.20,
+            "AWAY": 0.20,
+        },
+        {
+            "HOME": 2.0,
+            "DRAW": 4.0,
+            "AWAY": 5.0,
+        },
+        50_000,
+        uncertainty="LOW",
+    )
+
+    assert rows[0]["outcome"] == "HOME"
+    assert rows[0]["eligible"] is True
+
+
+# =========================================================
+# MODEL INDEPENDENCE FROM ODDS
+# =========================================================
+
+def test_pipeline_keeps_model_independent_of_odds():
+
+    from q200_engine.pipeline import Q200Pipeline
+
+    s = TeamStats(
+        2,
+        1,
+        1.2,
+        1.4,
+        1.7,
+        1.0,
+        1.1,
+        1.3,
+    )
+
+    p = Q200Pipeline(
+        s,
+        monte_carlo_iterations=100_000,
+    )
+
+    before = p.snapshot
+
+    p.analyze_odds(
+        {
+            "HOME": 2.0,
+            "DRAW": 3.5,
+            "AWAY": 4.0,
+        },
+        50_000,
+    )
+
+    assert p.snapshot == before
+
+
+# =========================================================
+# PIPELINE MODEL LOCK
+# =========================================================
+
+def test_pipeline_model_is_locked():
+
+    from q200_engine.pipeline import Q200Pipeline
+
+    s = TeamStats(
+        2,
+        1,
+        1.2,
+        1.4,
+        1.7,
+        1.0,
+        1.1,
+        1.3,
+    )
+
+    p = Q200Pipeline(
+        s,
+        monte_carlo_iterations=100_000,
+    )
+
+    assert p.model_locked is True
+
+
+# =========================================================
+# PIPELINE MONTE CARLO
+# =========================================================
+
+def test_pipeline_has_monte_carlo():
+
+    from q200_engine.pipeline import Q200Pipeline
+
+    s = TeamStats(
+        2,
+        1,
+        1.2,
+        1.4,
+        1.7,
+        1.0,
+        1.1,
+        1.3,
+    )
+
+    p = Q200Pipeline(
+        s,
+        monte_carlo_iterations=100_000,
+    )
+
+    probabilities = p.monte_carlo
+
+    assert set(probabilities.keys()) == {
+        "HOME",
+        "DRAW",
+        "AWAY",
+    }
+
+    assert sum(
+        probabilities.values()
+    ) == pytest.approx(
+        1.0,
+        abs=1e-12,
+    )
+
+
+# =========================================================
+# PIPELINE MINIMUM MONTE CARLO
+# =========================================================
+
+def test_pipeline_rejects_less_than_100k():
+
+    from q200_engine.pipeline import Q200Pipeline
+
+    s = TeamStats(
+        2,
+        1,
+        1.2,
+        1.4,
+    )
+
+    with pytest.raises(ValueError):
+
+        Q200Pipeline(
+            s,
+            monte_carlo_iterations=99_999,
+        )    result = quarter_kelly(
         0.70,
         2.0,
         50_000,
