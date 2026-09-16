@@ -34,14 +34,10 @@ class TeamStats:
 
     İlk 3 alan zorunludur.
 
-    Eski testler:
-
+    Legacy kullanım:
         TeamStats(2, 1, 1)
 
-    şeklinde çalışabilir.
-
-    Eski 7 parametreli yapı:
-
+    7 parametre:
         TeamStats(
             home_gf,
             home_ga,
@@ -52,9 +48,17 @@ class TeamStats:
             away_xga,
         )
 
-    şeklinde korunur.
-
-    Yeni kullanımda away_xg ayrıca verilebilir.
+    8 parametre:
+        TeamStats(
+            home_gf,
+            home_ga,
+            away_gf,
+            away_ga,
+            home_xg,
+            home_xga,
+            away_xga,
+            away_xg,
+        )
     """
 
     home_gf: float
@@ -66,10 +70,10 @@ class TeamStats:
     home_xg: Optional[float] = None
     home_xga: Optional[float] = None
 
-    # 7. alan legacy testlerle uyumluluk için away_xga
+    # Legacy 7. alan
     away_xga: Optional[float] = None
 
-    # 8. alan yeni standart away xG
+    # Yeni 8. alan
     away_xg: Optional[float] = None
 
 
@@ -82,7 +86,7 @@ class ModelSnapshot:
     """
     LOCK edilmiş model çıktısı.
 
-    Odds bu nesneyi değiştiremez.
+    Odds katmanı bu nesneyi değiştiremez.
     """
 
     lambda_home: float
@@ -116,7 +120,6 @@ class OddsInput:
     """
 
     market: str
-
     odds: Dict[str, float]
 
 
