@@ -88,14 +88,6 @@ from .performance import (
     market_performance,
 )
 
-from .backtest_runner import (
-    BACKTEST_RUNNER_VERSION,
-    BacktestRunItem,
-    BacktestRunSummary,
-    BacktestRunner,
-    run_history_backtest,
-)
-
 from .evaluation import (
     EVALUATION_VERSION,
     EvaluationReport,
@@ -103,6 +95,15 @@ from .evaluation import (
     evaluation_to_dict,
     evaluation_to_json,
     evaluation_to_text,
+)
+
+from .dataset_backtest import (
+    DATASET_BACKTEST_VERSION,
+    DatasetBacktestItem,
+    DatasetBacktestSummary,
+    DatasetBacktestRunner,
+    read_dataset_file,
+    run_dataset_backtest,
 )
 
 
@@ -161,16 +162,17 @@ __all__ = [
     "summarize_history",
     "market_performance",
 
-    "BACKTEST_RUNNER_VERSION",
-    "BacktestRunItem",
-    "BacktestRunSummary",
-    "BacktestRunner",
-    "run_history_backtest",
-
     "EVALUATION_VERSION",
     "EvaluationReport",
     "build_evaluation",
     "evaluation_to_dict",
     "evaluation_to_json",
     "evaluation_to_text",
+
+    "DATASET_BACKTEST_VERSION",
+    "DatasetBacktestItem",
+    "DatasetBacktestSummary",
+    "DatasetBacktestRunner",
+    "read_dataset_file",
+    "run_dataset_backtest",
 ]
