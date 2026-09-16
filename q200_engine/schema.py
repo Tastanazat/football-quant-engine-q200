@@ -1,38 +1,60 @@
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from dataclasses import dataclass
+from typing import Dict, Optional
 
 
-@dataclass(frozen=True)
+@dataclass
 class TeamStats:
     """
     Q200 takım istatistikleri.
 
-    İlk dört değer temel GF/GA verileridir.
-    xG alanları opsiyoneldir.
+    Yeni şema:
+        home_gf
+        home_ga
+        away_gf
+        away_ga
+        home_xg
+        home_xga
+        away_xg
+        away_xga
+
+    Eski 7-parametreli testlerle uyumluluk:
+        TeamStats(
+            home_gf,
+            home_ga,
+            away_gf,
+            away_ga,
+            home_xg,
+            home_xga,
+            away_xga
+        )
+
+    Yani 7. positional değer AWAY xGA olarak kabul edilir.
     """
 
-    home_gf: float
-    home_ga: float
-    away_gf: float
+    home_gf: float = 0.0
+    home_ga: float = 0.0
+
+    away_gf: float = 0.0
     away_ga: float = 0.0
 
     home_xg: Optional[float] = None
     home_xga: Optional[float] = None
-    away_xg: Optional[float] = None
+
+    # Eski testlerle uyumluluk için:
     away_xga: Optional[float] = None
+
+    # Yeni API için AWAY xG
+    away_xg: Optional[float] = None
 
 
 @dataclass(frozen=True)
 class ModelSnapshot:
-    """
-    LOCK edilmiş Q200 model çıktısı.
-    """
-
     lambda_home: float
     lambda_away: float
     probabilities: Dict[str, float]
-    max_goals: int
-    model_version: str
+    score_matrix: list
+    max_goals: int = 10
+    model_version: str = "Q200-V3.1"
     locked: bool = True
 
     @property
@@ -42,24 +64,14 @@ class ModelSnapshot:
 
 @dataclass(frozen=True)
 class OddsInput:
-    """
-    Odds katmanı.
-
-    Model oluşturulurken kullanılmaz.
-    """
-
     market: str
     odds: Dict[str, float]
 
 
 @dataclass
 class AnalysisResult:
-    """
-    Q200 analiz sonucu.
-    """
-
     snapshot: ModelSnapshot
     fair_odds: Dict[str, float]
     no_vig_probabilities: Dict[str, float]
     ev: Dict[str, float]
-    selections: List[dict] = field(default_factory=list)
+    selections: list
