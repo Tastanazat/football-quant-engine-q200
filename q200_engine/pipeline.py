@@ -29,13 +29,17 @@ SELECTION
     ↓
 KELLY
 
-ÖNEMLİ:
-Odds modeli değiştiremez.
-Model snapshot LOCK edildikten sonra immutable kalır.
+KRİTİK KURAL:
+
+Odds model oluşturma aşamasında KULLANILMAZ.
+
+Model snapshot LOCK edildikten sonra
+odds analizi model parametrelerini değiştiremez.
 """
 
 from __future__ import annotations
 
+from math import isfinite
 from typing import Dict
 
 from .schema import (
@@ -49,37 +53,69 @@ from .odds import implied_probabilities
 from .selection import select
 
 
+# =========================================================
+# CONSTANTS
+# =========================================================
+
+PIPELINE_VERSION = "Q200-V3.1"
+
+VALID_UNCERTAINTY = {
+    "LOW",
+    "MEDIUM",
+    "HIGH",
+    "VERY_HIGH",
+}
+
+
+# =========================================================
+# Q200 PIPELINE
+# =========================================================
+
 class Q200Pipeline:
     """
     Q200 V3.1 ana analiz pipeline'ı.
 
-    Kullanım:
+    Stage 1:
+        Statistics
+            ↓
+        Lambda
+            ↓
+        Poisson
+            ↓
+        Monte Carlo
+            ↓
+        Model Lock
 
-        stats = TeamStats(
-            2.0,
-            1.2,
-            1.5,
-            1.8,
-            1.1,
-            1.0,
-            1.4,
-        )
+    Stage 2:
+        Odds
+            ↓
+        No-Vig
+            ↓
+        Fair Odds
+            ↓
+        EV
+            ↓
+        Selection
+            ↓
+        Kelly
 
-        pipeline = Q200Pipeline(stats)
-
-        result = pipeline.analyze_odds(
-            {
-                "HOME": 2.00,
-                "DRAW": 3.50,
-                "AWAY": 4.00,
-            },
-            bankroll=50_000,
-        )
+    KRİTİK:
+        Odds Stage 1'e hiçbir şekilde girmez.
     """
 
-    VERSION = "Q200-V3.1"
+    VERSION = PIPELINE_VERSION
+
+    # =====================================================
+    # INIT
+    # =====================================================
 
     def __init__(self, stats: TeamStats):
+        """
+        Pipeline oluşturur.
+
+        Model burada oluşturulur ve LOCK edilir.
+        """
+
         if not isinstance(stats, TeamStats):
             raise TypeError(
                 "stats must be an instance of TeamStats"
@@ -87,15 +123,18 @@ class Q200Pipeline:
 
         self.stats = stats
 
-        # =================================================
+        # -------------------------------------------------
+        # STAGE 1
         # MODEL BUILD
-        # =================================================
+        # -------------------------------------------------
 
-        self.snapshot: ModelSnapshot = build_model(stats)
+        self.snapshot: ModelSnapshot = build_model(
+            stats
+        )
 
-        # =================================================
+        # -------------------------------------------------
         # MODEL LOCK CHECK
-        # =================================================
+        # -------------------------------------------------
 
         if not self.snapshot.locked:
             raise RuntimeError(
@@ -103,40 +142,184 @@ class Q200Pipeline:
             )
 
     # =====================================================
-    # MODEL
+    # MODEL STATUS
     # =====================================================
 
     @property
     def model_locked(self) -> bool:
         """
-        Modelin LOCK durumunu döndürür.
+        Model LOCK durumunu döndürür.
         """
-        return self.snapshot.locked
+
+        return bool(
+            self.snapshot.locked
+        )
+
+    # =====================================================
+    # LAMBDA
+    # =====================================================
 
     @property
     def lambda_home(self) -> float:
         """
         Ev takımının lambda değerini döndürür.
         """
-        return self.snapshot.lambda_home
+
+        return float(
+            self.snapshot.lambda_home
+        )
 
     @property
     def lambda_away(self) -> float:
         """
         Deplasman takımının lambda değerini döndürür.
         """
-        return self.snapshot.lambda_away
+
+        return float(
+            self.snapshot.lambda_away
+        )
+
+    # =====================================================
+    # MODEL PROBABILITIES
+    # =====================================================
 
     @property
     def probabilities(self) -> Dict[str, float]:
         """
-        Model tarafından üretilen olasılıkları döndürür.
+        LOCK edilmiş model olasılıklarını döndürür.
 
-        ÖNEMLİ:
-        Dönen değer snapshot içindeki model
-        olasılıklarıdır.
+        Odds tarafından değiştirilmez.
         """
-        return dict(self.snapshot.probabilities)
+
+        return dict(
+            self.snapshot.probabilities
+        )
+
+    # =====================================================
+    # MODEL VERSION
+    # =====================================================
+
+    @property
+    def model_version(self) -> str:
+        """
+        Model versiyonunu döndürür.
+        """
+
+        return self.snapshot.model_version
+
+    # =====================================================
+    # ODDS VALIDATION
+    # =====================================================
+
+    @staticmethod
+    def _validate_odds(
+        odds: Dict[str, float],
+    ) -> Dict[str, float]:
+        """
+        Odds girişini doğrular ve normalize eder.
+        """
+
+        if not isinstance(odds, dict):
+            raise TypeError(
+                "odds must be a dictionary"
+            )
+
+        if not odds:
+            raise ValueError(
+                "odds cannot be empty"
+            )
+
+        normalized = {}
+
+        for key, value in odds.items():
+
+            outcome = str(key).upper().strip()
+
+            try:
+                price = float(value)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"Invalid odds for {outcome}: {value}"
+                )
+
+            if not isfinite(price):
+                raise ValueError(
+                    f"Odds must be finite for {outcome}"
+                )
+
+            if price <= 1.0:
+                raise ValueError(
+                    f"Invalid odds for {outcome}: {price}"
+                )
+
+            normalized[outcome] = price
+
+        return normalized
+
+    # =====================================================
+    # UNCERTAINTY VALIDATION
+    # =====================================================
+
+    @staticmethod
+    def _validate_uncertainty(
+        uncertainty: str,
+    ) -> str:
+        """
+        Belirsizlik seviyesini normalize eder.
+        """
+
+        if not isinstance(
+            uncertainty,
+            str,
+        ):
+            raise TypeError(
+                "uncertainty must be a string"
+            )
+
+        normalized = (
+            uncertainty
+            .strip()
+            .upper()
+        )
+
+        if normalized not in VALID_UNCERTAINTY:
+            raise ValueError(
+                "uncertainty must be one of: "
+                "LOW, MEDIUM, HIGH, VERY_HIGH"
+            )
+
+        return normalized
+
+    # =====================================================
+    # BANKROLL VALIDATION
+    # =====================================================
+
+    @staticmethod
+    def _validate_bankroll(
+        bankroll: float,
+    ) -> float:
+        """
+        Bankroll değerini doğrular.
+        """
+
+        try:
+            value = float(bankroll)
+        except (TypeError, ValueError):
+            raise ValueError(
+                "bankroll must be numeric"
+            )
+
+        if not isfinite(value):
+            raise ValueError(
+                "bankroll must be finite"
+            )
+
+        if value <= 0:
+            raise ValueError(
+                "bankroll must be greater than zero"
+            )
+
+        return value
 
     # =====================================================
     # ODDS ANALYSIS
@@ -149,59 +332,60 @@ class Q200Pipeline:
         uncertainty: str = "MEDIUM",
     ) -> AnalysisResult:
         """
-        Odds analizini gerçekleştirir.
+        Stage 2 odds analizini gerçekleştirir.
 
-        ÖNEMLİ:
-        Bu fonksiyon model snapshot'ını değiştirmez.
+        Akış:
 
-        Args:
-            odds:
-                {
-                    "HOME": 2.00,
-                    "DRAW": 3.50,
-                    "AWAY": 4.00
-                }
+            LOCKED MODEL
+                 ↓
+               ODDS
+                 ↓
+              NO-VIG
+                 ↓
+             FAIR ODDS
+                 ↓
+                EV
+                 ↓
+             SELECTION
+                 ↓
+               KELLY
 
-            bankroll:
-                Kullanılacak bankroll.
+        KRİTİK:
 
-            uncertainty:
-                LOW / MEDIUM / HIGH / VERY_HIGH
+        Bu fonksiyon model snapshot'ını değiştiremez.
         """
 
         # =================================================
         # INPUT VALIDATION
         # =================================================
 
-        if not isinstance(odds, dict):
-            raise TypeError(
-                "odds must be a dictionary"
+        normalized_odds = self._validate_odds(
+            odds
+        )
+
+        validated_bankroll = (
+            self._validate_bankroll(
+                bankroll
             )
+        )
 
-        if bankroll <= 0:
-            raise ValueError(
-                "bankroll must be greater than zero"
+        normalized_uncertainty = (
+            self._validate_uncertainty(
+                uncertainty
             )
-
-        if not odds:
-            raise ValueError(
-                "odds cannot be empty"
-            )
-
-        normalized_odds = {
-            str(key).upper(): float(value)
-            for key, value in odds.items()
-        }
-
-        for outcome, value in normalized_odds.items():
-
-            if value <= 1.0:
-                raise ValueError(
-                    f"Invalid odds for {outcome}: {value}"
-                )
+        )
 
         # =================================================
-        # SNAPSHOT BEFORE ODDS
+        # MODEL LOCK CHECK
+        # =================================================
+
+        if not self.snapshot.locked:
+            raise RuntimeError(
+                "Cannot analyze odds with an unlocked model."
+            )
+
+        # =================================================
+        # SNAPSHOT REFERENCE
         # =================================================
 
         snapshot_before = self.snapshot
@@ -218,31 +402,46 @@ class Q200Pipeline:
         # FAIR ODDS
         # =================================================
 
-        fair_odds = {}
+        fair_odds: Dict[str, float] = {}
 
-        for outcome, probability in (
-            self.snapshot.probabilities.items()
-        ):
+        for (
+            outcome,
+            probability,
+        ) in self.snapshot.probabilities.items():
 
             if probability > 0:
-                fair_odds[outcome] = 1.0 / probability
+
+                fair_odds[outcome] = (
+                    1.0 / probability
+                )
+
             else:
-                fair_odds[outcome] = float("inf")
+
+                fair_odds[outcome] = (
+                    float("inf")
+                )
 
         # =================================================
         # EV
         #
-        # EV = probability * odds - 1
+        # EV = Model Probability × Odds - 1
         # =================================================
 
-        ev = {}
+        ev: Dict[str, float] = {}
 
-        for outcome, price in normalized_odds.items():
+        for (
+            outcome,
+            price,
+        ) in normalized_odds.items():
 
-            probability = self.snapshot.probabilities.get(
-                outcome
+            probability = (
+                self.snapshot.probabilities.get(
+                    outcome
+                )
             )
 
+            # Odds marketinde model karşılığı
+            # bulunmuyorsa hesaplama yapılmaz.
             if probability is None:
                 continue
 
@@ -257,13 +456,19 @@ class Q200Pipeline:
         selections = select(
             self.snapshot.probabilities,
             normalized_odds,
-            bankroll,
-            uncertainty=uncertainty,
+            validated_bankroll,
+            uncertainty=normalized_uncertainty,
         )
 
         # =================================================
-        # MODEL IMMUTABILITY CHECK
+        # MODEL LOCK INTEGRITY CHECK
         # =================================================
+
+        if self.snapshot is not snapshot_before:
+            raise RuntimeError(
+                "CRITICAL: model snapshot reference "
+                "was replaced during odds analysis."
+            )
 
         if self.snapshot != snapshot_before:
             raise RuntimeError(
@@ -299,6 +504,16 @@ def run_pipeline(
 
     Örnek:
 
+        stats = TeamStats(
+            2.0,
+            1.2,
+            1.5,
+            1.8,
+            1.1,
+            1.0,
+            1.4,
+        )
+
         result = run_pipeline(
             stats,
             {
@@ -310,7 +525,9 @@ def run_pipeline(
         )
     """
 
-    pipeline = Q200Pipeline(stats)
+    pipeline = Q200Pipeline(
+        stats
+    )
 
     return pipeline.analyze_odds(
         odds=odds,
