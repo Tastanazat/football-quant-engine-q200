@@ -31,37 +31,6 @@ class TeamStats:
         6. home_xga
         7. away_xga
         8. away_xg
-
-    İlk 3 alan zorunludur.
-
-    Legacy kullanım:
-
-        TeamStats(2, 1, 1)
-
-    7 parametreli kullanım:
-
-        TeamStats(
-            home_gf,
-            home_ga,
-            away_gf,
-            away_ga,
-            home_xg,
-            home_xga,
-            away_xga,
-        )
-
-    8 parametreli kullanım:
-
-        TeamStats(
-            home_gf,
-            home_ga,
-            away_gf,
-            away_ga,
-            home_xg,
-            home_xga,
-            away_xga,
-            away_xg,
-        )
     """
 
     home_gf: float
@@ -73,16 +42,10 @@ class TeamStats:
     home_xg: Optional[float] = None
     home_xga: Optional[float] = None
 
-    # -----------------------------------------------------
     # Legacy alan
-    # -----------------------------------------------------
-
     away_xga: Optional[float] = None
 
-    # -----------------------------------------------------
     # Yeni standart alan
-    # -----------------------------------------------------
-
     away_xg: Optional[float] = None
 
 
@@ -95,19 +58,7 @@ class ModelSnapshot:
     """
     LOCK edilmiş model çıktısı.
 
-    Bu nesne MODEL aşamasının sonucudur.
-
     Odds katmanı bu nesneyi değiştiremez.
-
-    İçerik:
-
-        lambda_home
-        lambda_away
-        model probabilities
-        score matrix
-        Monte Carlo probabilities
-        model version
-        lock status
     """
 
     # -----------------------------------------------------
@@ -157,10 +108,6 @@ class ModelSnapshot:
 
     @property
     def model_locked(self) -> bool:
-        """
-        Modelin LOCK durumunu döndürür.
-        """
-
         return self.locked
 
 
@@ -174,9 +121,6 @@ class OddsInput:
     Odds katmanı.
 
     Model katmanından tamamen bağımsızdır.
-
-    Odds bilgisi ModelSnapshot oluşturulurken
-    kullanılmaz.
     """
 
     market: str
@@ -193,16 +137,16 @@ class AnalysisResult:
     """
     Pipeline nihai analiz sonucu.
 
-    ModelSnapshot LOCK edilmiş model çıktısını taşır.
+    İçerik:
 
-    Odds aşamasından sonra:
-
+        Locked Model
         Fair Odds
         No-Vig
-        EV
-        Selections
-
-    burada tutulur.
+        Baseline EV
+        Stress Probabilities
+        Pessimistic Probabilities
+        Pessimistic EV
+        Final Selections
     """
 
     # -----------------------------------------------------
@@ -228,10 +172,42 @@ class AnalysisResult:
     )
 
     # -----------------------------------------------------
-    # EXPECTED VALUE
+    # BASELINE EXPECTED VALUE
     # -----------------------------------------------------
 
     ev: Dict[str, float] = field(
+        default_factory=dict
+    )
+
+    # -----------------------------------------------------
+    # STRESS LAMBDAS
+    # -----------------------------------------------------
+
+    stress_lambdas: Dict[str, Dict[str, float]] = field(
+        default_factory=dict
+    )
+
+    # -----------------------------------------------------
+    # STRESS MARKET PROBABILITIES
+    # -----------------------------------------------------
+
+    stress_probabilities: Dict[str, Dict[str, float]] = field(
+        default_factory=dict
+    )
+
+    # -----------------------------------------------------
+    # PESSIMISTIC PROBABILITIES
+    # -----------------------------------------------------
+
+    pessimistic_probabilities: Dict[str, float] = field(
+        default_factory=dict
+    )
+
+    # -----------------------------------------------------
+    # PESSIMISTIC EXPECTED VALUE
+    # -----------------------------------------------------
+
+    pessimistic_ev: Dict[str, float] = field(
         default_factory=dict
     )
 
