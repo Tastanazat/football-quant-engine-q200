@@ -88,6 +88,15 @@ from .performance import (
     market_performance,
 )
 
+from .evaluation import (
+    EVALUATION_VERSION,
+    EvaluationReport,
+    build_evaluation,
+    evaluation_to_dict,
+    evaluation_to_json,
+    evaluation_to_text,
+)
+
 
 __all__ = [
     "TeamStats",
@@ -143,4 +152,11 @@ __all__ = [
     "MarketPerformance",
     "summarize_history",
     "market_performance",
+
+    "EVALUATION_VERSION",
+    "EvaluationReport",
+    "build_evaluation",
+    "evaluation_to_dict",
+    "evaluation_to_json",
+    "evaluation_to_text",
 ]
