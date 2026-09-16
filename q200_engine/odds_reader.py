@@ -135,34 +135,60 @@ def _normalize_odds(
 
 def _validate_headers(
     raw_headers: list[Any],
-) -> list[str]:
+) -> tuple[list[str], dict[str, str]]:
     """
-    Header'ları normalize eder ve doğrular.
+    Header'ları normalize eder ve ham header → normalize header
+    eşlemesini oluşturur.
+
+    Örneğin:
+
+        " OUTCOME " → "outcome"
+        " ODDS "    → "odds"
     """
 
-    headers = [
-        _normalize_header(header)
-        for header in raw_headers
-    ]
+    normalized_headers: list[str] = []
+    header_mapping: dict[str, str] = {}
 
-    if len(headers) != len(set(headers)):
-        raise ValueError(
-            "Odds dosyasında tekrar eden sütun adı var."
+    for raw_header in raw_headers:
+
+        normalized = _normalize_header(
+            raw_header
         )
 
-    missing = REQUIRED_HEADERS - set(headers)
+        if normalized in normalized_headers:
+            raise ValueError(
+                "Odds dosyasında tekrar eden sütun adı var."
+            )
+
+        normalized_headers.append(
+            normalized
+        )
+
+        header_mapping[
+            str(raw_header)
+        ] = normalized
+
+    missing = (
+        REQUIRED_HEADERS
+        - set(normalized_headers)
+    )
 
     if missing:
         raise ValueError(
             "Eksik Odds sütunu: "
-            + ", ".join(sorted(missing))
+            + ", ".join(
+                sorted(missing)
+            )
         )
 
-    return headers
+    return (
+        normalized_headers,
+        header_mapping,
+    )
 
 
 def _append_row(
-    rows: list[dict[str, float]],
+    rows: list[dict[str, Any]],
     row: dict[str, Any],
 ) -> None:
     """
@@ -187,7 +213,7 @@ def _append_row(
 
 def read_odds_csv(
     path: str | Path,
-) -> list[dict[str, float]]:
+) -> list[dict[str, Any]]:
     """
     CSV Odds dosyasını okur.
 
@@ -211,7 +237,7 @@ def read_odds_csv(
             f"Odds path bir dosya olmalıdır: {file_path}"
         )
 
-    rows: list[dict[str, float]] = []
+    rows: list[dict[str, Any]] = []
 
     with file_path.open(
         "r",
@@ -219,14 +245,19 @@ def read_odds_csv(
         newline="",
     ) as file:
 
-        reader = csv.DictReader(file)
+        reader = csv.DictReader(
+            file
+        )
 
         if reader.fieldnames is None:
             raise ValueError(
                 "CSV Odds dosyasında sütun başlığı bulunamadı."
             )
 
-        headers = _validate_headers(
+        (
+            headers,
+            header_mapping,
+        ) = _validate_headers(
             list(reader.fieldnames)
         )
 
@@ -237,8 +268,28 @@ def read_odds_csv(
 
             row: dict[str, Any] = {}
 
+            for raw_header, value in raw_row.items():
+
+                if raw_header is None:
+                    continue
+
+                normalized_header = (
+                    header_mapping.get(
+                        raw_header
+                    )
+                )
+
+                if normalized_header is None:
+                    continue
+
+                row[
+                    normalized_header
+                ] = value
+
             for header in headers:
-                row[header] = raw_row.get(header)
+
+                if header not in row:
+                    row[header] = None
 
             if all(
                 value is None
@@ -265,7 +316,7 @@ def read_odds_csv(
 
 def read_odds_xlsx(
     path: str | Path,
-) -> list[dict[str, float]]:
+) -> list[dict[str, Any]]:
     """
     XLSX Odds dosyasını okur.
 
@@ -298,6 +349,7 @@ def read_odds_xlsx(
     )
 
     try:
+
         worksheet = workbook.active
 
         rows_iterator = worksheet.iter_rows(
@@ -313,17 +365,22 @@ def read_odds_xlsx(
                 "XLSX Odds dosyası boş."
             ) from exc
 
-        headers = _validate_headers(
+        (
+            headers,
+            _header_mapping,
+        ) = _validate_headers(
             list(raw_headers)
         )
 
-        rows: list[dict[str, float]] = []
+        rows: list[dict[str, Any]] = []
 
         for raw_row in rows_iterator:
 
             row: dict[str, Any] = {}
 
-            for index, header in enumerate(headers):
+            for index, header in enumerate(
+                headers
+            ):
 
                 value = (
                     raw_row[index]
@@ -361,14 +418,16 @@ def read_odds_xlsx(
 
 def read_odds_file(
     path: str | Path,
-) -> list[dict[str, float]]:
+) -> list[dict[str, Any]]:
     """
     CSV veya XLSX Odds dosyasını okur.
     """
 
     file_path = Path(path)
 
-    extension = file_path.suffix.lower()
+    extension = (
+        file_path.suffix.lower()
+    )
 
     if extension == ".csv":
         return read_odds_csv(
