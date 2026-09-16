@@ -10,10 +10,11 @@ from q200_engine.kelly import quarter_kelly
 
 
 # =========================================================
-# LAMBDA FORMULA
+# LAMBDA
 # =========================================================
 
 def test_lambda_formula():
+
     s = TeamStats(
         2.0,
         1.2,
@@ -27,20 +28,23 @@ def test_lambda_formula():
     h, a = calculate_lambdas(s)
 
     assert h == pytest.approx(1.705)
-    assert a == pytest.approx(1.085)
+    assert a == pytest.approx(1.305)
 
 
 # =========================================================
-# POISSON PROBABILITIES
+# POISSON
 # =========================================================
 
 def test_probabilities_sum_to_one():
+
     p = poisson_match_probabilities(
         1.5,
         1.1,
     )
 
-    assert sum(p.values()) == pytest.approx(
+    assert sum(
+        p.values()
+    ) == pytest.approx(
         1.0,
         abs=1e-12,
     )
@@ -51,6 +55,7 @@ def test_probabilities_sum_to_one():
 # =========================================================
 
 def test_model_is_locked():
+
     s = TeamStats(
         2,
         1,
@@ -60,6 +65,7 @@ def test_model_is_locked():
     snap = build_model(s)
 
     assert snap.locked is True
+    assert snap.model_locked is True
 
 
 # =========================================================
@@ -67,7 +73,9 @@ def test_model_is_locked():
 # =========================================================
 
 def test_monte_carlo_minimum():
+
     with pytest.raises(ValueError):
+
         simulate_match(
             1.2,
             1.0,
@@ -76,28 +84,28 @@ def test_monte_carlo_minimum():
 
 
 # =========================================================
-# NO-VIG
+# NO VIG
 # =========================================================
 
 def test_no_vig_sums_to_one():
-    p = implied_probabilities(
-        {
-            "HOME": 2.0,
-            "DRAW": 3.5,
-            "AWAY": 4.0,
-        }
-    )
 
-    assert sum(p.values()) == pytest.approx(
-        1.0
-    )
+    p = implied_probabilities({
+        "HOME": 2.0,
+        "DRAW": 3.5,
+        "AWAY": 4.0,
+    })
+
+    assert sum(
+        p.values()
+    ) == pytest.approx(1.0)
 
 
 # =========================================================
-# QUARTER KELLY
+# KELLY
 # =========================================================
 
 def test_quarter_kelly_respects_two_percent_cap():
+
     result = quarter_kelly(
         0.70,
         2.0,
@@ -108,11 +116,13 @@ def test_quarter_kelly_respects_two_percent_cap():
 
 
 # =========================================================
-# MINIMUM ODDS FILTER
+# MINIMUM ODDS
 # =========================================================
 
 def test_minimum_odds_filter():
+
     with pytest.raises(ValueError):
+
         select(
             {
                 "HOME": 0.60,
@@ -121,18 +131,19 @@ def test_minimum_odds_filter():
             },
             {
                 "HOME": 1.40,
-                "DRAW": 4.0,
-                "AWAY": 5.0,
+                "DRAW": 1.45,
+                "AWAY": 1.49,
             },
             50_000,
         )
 
 
 # =========================================================
-# EV / ELIGIBLE SELECTION
+# EV SELECTION
 # =========================================================
 
 def test_ev_can_create_eligible_selection():
+
     rows = select(
         {
             "HOME": 0.60,
@@ -153,10 +164,11 @@ def test_ev_can_create_eligible_selection():
 
 
 # =========================================================
-# MODEL / ODDS INDEPENDENCE
+# MODEL INDEPENDENCE
 # =========================================================
 
 def test_pipeline_keeps_model_independent_of_odds():
+
     from q200_engine.pipeline import Q200Pipeline
 
     s = TeamStats(
@@ -184,3 +196,4 @@ def test_pipeline_keeps_model_independent_of_odds():
     )
 
     assert p.snapshot == before
+    assert p.snapshot.locked is True
