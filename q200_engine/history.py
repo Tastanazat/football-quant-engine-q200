@@ -25,7 +25,8 @@ from typing import Any
 from .report import build_report
 
 
-HISTORY_SCHEMA_VERSION = "Q200-HISTORY-V3"
+# Mevcut History test sözleşmesi korunuyor.
+HISTORY_SCHEMA_VERSION = "Q200-HISTORY-V2"
 
 
 def _validate_text(
@@ -234,10 +235,6 @@ class AnalysisHistory:
         result,
         match_id: str,
     ) -> int:
-        """
-        AnalysisResult'ı geçmişe kaydeder
-        ve kayıt ID'sini döndürür.
-        """
 
         match_id = _validate_text(
             match_id,
@@ -301,12 +298,6 @@ class AnalysisHistory:
         home_goals: int,
         away_goals: int,
     ) -> bool:
-        """
-        Kayıtlı analize maç sonucunu ekler.
-
-        Yeni sonuç kaydedildiğinde daha önce hesaplanmış
-        settlement otomatik olarak geçersiz hale getirilir.
-        """
 
         if not isinstance(
             record_id,
@@ -367,13 +358,6 @@ class AnalysisHistory:
         record_id: int,
         settlement: dict[str, Any],
     ) -> bool:
-        """
-        Hesaplanmış settlement sonucunu History kaydına
-        kalıcı olarak yazar.
-
-        Settlement yalnızca maç sonucu zaten kaydedilmişse
-        yazılabilir.
-        """
 
         if not isinstance(
             record_id,
@@ -502,11 +486,6 @@ class AnalysisHistory:
         self,
         record_id: int,
     ) -> dict[str, Any]:
-        """
-        History kaydındaki kayıtlı maç sonucu ile
-        settlement hesaplar ve sonucu SQLite'a
-        kalıcı olarak kaydeder.
-        """
 
         record = self.get(
             record_id
@@ -547,9 +526,6 @@ class AnalysisHistory:
         self,
         record_id: int,
     ) -> dict[str, Any] | None:
-        """
-        ID ile tek geçmiş kaydını getirir.
-        """
 
         if not isinstance(
             record_id,
@@ -633,9 +609,6 @@ class AnalysisHistory:
         self,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-        """
-        En yeni analizleri listeler.
-        """
 
         if not isinstance(
             limit,
@@ -711,9 +684,6 @@ class AnalysisHistory:
     def count(
         self,
     ) -> int:
-        """
-        Toplam kayıt sayısını döndürür.
-        """
 
         with self._connect() as connection:
 
@@ -731,10 +701,6 @@ class AnalysisHistory:
     def count_completed(
         self,
     ) -> int:
-        """
-        Sonucu kaydedilmiş analizlerin
-        toplam sayısını döndürür.
-        """
 
         with self._connect() as connection:
 
@@ -754,9 +720,6 @@ class AnalysisHistory:
         self,
         record_id: int,
     ) -> bool:
-        """
-        Bir geçmiş kaydını siler.
-        """
 
         if not isinstance(
             record_id,
