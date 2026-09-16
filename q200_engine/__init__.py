@@ -88,6 +88,14 @@ from .performance import (
     market_performance,
 )
 
+from .backtest_runner import (
+    BACKTEST_RUNNER_VERSION,
+    BacktestRunItem,
+    BacktestRunSummary,
+    BacktestRunner,
+    run_history_backtest,
+)
+
 from .evaluation import (
     EVALUATION_VERSION,
     EvaluationReport,
@@ -152,6 +160,12 @@ __all__ = [
     "MarketPerformance",
     "summarize_history",
     "market_performance",
+
+    "BACKTEST_RUNNER_VERSION",
+    "BacktestRunItem",
+    "BacktestRunSummary",
+    "BacktestRunner",
+    "run_history_backtest",
 
     "EVALUATION_VERSION",
     "EvaluationReport",
