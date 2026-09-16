@@ -480,3 +480,136 @@ def test_mixed_statistics_and_odds_formats(
         result.snapshot.lambda_away
         > 0
     )
+
+
+def test_run_q200_auto_saves_history(
+    tmp_path,
+):
+
+    statistics_1, statistics_2 = (
+        create_statistics_files(
+            tmp_path
+        )
+    )
+
+    odds = create_odds_file(
+        tmp_path
+    )
+
+    history_path = (
+        tmp_path
+        / "history.sqlite"
+    )
+
+    result = run_q200_from_files(
+        statistics_1,
+        statistics_2,
+        odds,
+        bankroll=50_000,
+        history_path=history_path,
+        match_id="MATCH-001",
+    )
+
+    from q200_engine.history import (
+        AnalysisHistory,
+    )
+
+    history = AnalysisHistory(
+        history_path
+    )
+
+    assert history.count() == 1
+
+    record = history.get(1)
+
+    assert record is not None
+    assert record["match_id"] == "MATCH-001"
+
+    assert (
+        record["report"]["model_locked"]
+        is True
+    )
+
+    assert (
+        record["model_version"]
+        == "Q200-V3.1"
+    )
+
+    assert result.snapshot.locked is True
+
+
+def test_run_q200_requires_both_history_arguments(
+    tmp_path,
+):
+
+    statistics_1, statistics_2 = (
+        create_statistics_files(
+            tmp_path
+        )
+    )
+
+    odds = create_odds_file(
+        tmp_path
+    )
+
+    history_path = (
+        tmp_path
+        / "history.sqlite"
+    )
+
+    with pytest.raises(
+        ValueError
+    ):
+
+        run_q200_from_files(
+            statistics_1,
+            statistics_2,
+            odds,
+            bankroll=50_000,
+            history_path=history_path,
+        )
+
+    with pytest.raises(
+        ValueError
+    ):
+
+        run_q200_from_files(
+            statistics_1,
+            statistics_2,
+            odds,
+            bankroll=50_000,
+            match_id="MATCH-002",
+        )
+
+
+def test_run_q200_history_save_preserves_result(
+    tmp_path,
+):
+
+    statistics_1, statistics_2 = (
+        create_statistics_files(
+            tmp_path
+        )
+    )
+
+    odds = create_odds_file(
+        tmp_path
+    )
+
+    history_path = (
+        tmp_path
+        / "history.sqlite"
+    )
+
+    result = run_q200_from_files(
+        statistics_1,
+        statistics_2,
+        odds,
+        bankroll=50_000,
+        history_path=history_path,
+        match_id="MATCH-003",
+    )
+
+    assert result.snapshot.locked is True
+    assert result.snapshot.lambda_home > 0
+    assert result.snapshot.lambda_away > 0
