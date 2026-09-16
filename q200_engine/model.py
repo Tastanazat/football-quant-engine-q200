@@ -3,7 +3,7 @@ Q200 Engine - Model Layer
 
 Q200 V3.1
 
-Stage 1:
+STAGE 1:
 
 Statistics
     ↓
@@ -35,6 +35,13 @@ from .schema import ModelSnapshot, TeamStats
 
 
 # =========================================================
+# MODEL VERSION
+# =========================================================
+
+MODEL_VERSION = "Q200-V3.1"
+
+
+# =========================================================
 # MODEL WEIGHTS
 # =========================================================
 
@@ -57,25 +64,20 @@ MONTE_CARLO_ITERATIONS = 100_000
 
 
 # =========================================================
-# MODEL VERSION
-# =========================================================
-
-MODEL_VERSION = "Q200-V3.1"
-
-
-# =========================================================
 # VALIDATION
 # =========================================================
 
 def _valid(value: Optional[float]) -> bool:
     """
-    Değerin kullanılabilir bir istatistik olup olmadığını kontrol eder.
+    Bir istatistik değerinin kullanılabilir olup olmadığını
+    kontrol eder.
 
-    Geçerli değer:
-        - None değil
-        - int veya float
-        - finite
-        - negatif değil
+    Geçerli değerler:
+
+    - None değil
+    - int veya float
+    - finite
+    - negatif değil
     """
 
     return (
@@ -97,17 +99,17 @@ def _weighted_average(
     """
     Mevcut istatistikleri ağırlıklı olarak birleştirir.
 
-    Bir veri eksikse mevcut verilerin ağırlıkları
+    Bir istatistik eksikse mevcut istatistiklerin ağırlıkları
     kendi aralarında normalize edilir.
 
-    Örnek:
+    Örneğin:
 
-        GF   = 2.0  weight=0.35
-        GA   = 1.8  weight=0.35
+        GF   = 2.0 -> 0.35
+        GA   = 1.8 -> 0.35
         xG   = None
-        xGA  = 1.4  weight=0.15
+        xGA  = 1.4 -> 0.15
 
-    Eksik xG nedeniyle kalan ağırlıklar normalize edilir.
+    Eksik veri nedeniyle mevcut ağırlıklar normalize edilir.
     """
 
     available = [
@@ -163,10 +165,11 @@ def calculate_lambdas(
       + 0.15 * Away xG
       + 0.15 * Home xGA
 
-    xG/xGA eksikse mevcut ağırlıklar normalize edilir.
+    xG/xGA eksikse mevcut bileşenlerin ağırlıkları
+    normalize edilir.
 
     KRİTİK:
-    Odds burada kullanılmaz.
+    Odds kesinlikle kullanılmaz.
     """
 
     if not isinstance(stats, TeamStats):
@@ -201,25 +204,6 @@ def calculate_lambdas(
     )
 
     # -----------------------------------------------------
-    # AWAY xG
-    # -----------------------------------------------------
-    #
-    # Legacy uyumluluk:
-    #
-    # Eski 7-parametreli TeamStats yapısında
-    # away_xg bulunmadığında away_xga son alan olabilir.
-    #
-    # Bu durumda mevcut away_xga değeri fallback olarak
-    # away_xg tarafında da kullanılabilir.
-    # -----------------------------------------------------
-
-    away_xg = (
-        stats.away_xg
-        if _valid(stats.away_xg)
-        else stats.away_xga
-    )
-
-    # -----------------------------------------------------
     # AWAY LAMBDA
     # -----------------------------------------------------
 
@@ -234,7 +218,7 @@ def calculate_lambdas(
                 HOME_GA_WEIGHT,
             ),
             (
-                away_xg,
+                stats.away_xg,
                 AWAY_XG_WEIGHT,
             ),
             (
@@ -287,14 +271,11 @@ def build_model(
           ↓
         MODEL SNAPSHOT
           ↓
-        LOCK 🔒
+        LOCK
 
     KRİTİK KURAL:
 
         Odds bu fonksiyona girmez.
-
-    Böylece oranların model oluşturma aşamasını
-    etkilemesi mümkün değildir.
     """
 
     # -----------------------------------------------------
@@ -318,6 +299,7 @@ def build_model(
 
     # -----------------------------------------------------
     # STEP 1
+    # LAMBDA
     # -----------------------------------------------------
 
     lambda_home, lambda_away = calculate_lambdas(
@@ -351,6 +333,12 @@ def build_model(
     # MONTE CARLO
     # -----------------------------------------------------
 
+    # Monte Carlo burada çalıştırılır.
+    #
+    # ModelSnapshot şemasına ayrıca yeni bir alan
+    # eklemiyoruz. Böylece mevcut schema.py ile uyum
+    # korunur.
+
     monte_carlo = simulate_match(
         lambda_home,
         lambda_away,
@@ -358,8 +346,31 @@ def build_model(
     )
 
     # -----------------------------------------------------
+    # MONTE CARLO VALIDATION
+    # -----------------------------------------------------
+
+    if not isinstance(monte_carlo, dict):
+        raise TypeError(
+            "Monte Carlo sonucu dict olmalıdır."
+        )
+
+    required_keys = {
+        "HOME",
+        "DRAW",
+        "AWAY",
+    }
+
+    if not required_keys.issubset(
+        monte_carlo.keys()
+    ):
+        raise ValueError(
+            "Monte Carlo sonucu HOME/DRAW/AWAY "
+            "alanlarını içermelidir."
+        )
+
+    # -----------------------------------------------------
     # STEP 5
-    # LOCK MODEL
+    # MODEL LOCK
     # -----------------------------------------------------
 
     snapshot = ModelSnapshot(
@@ -367,7 +378,6 @@ def build_model(
         lambda_away=lambda_away,
         probabilities=probabilities,
         score_matrix=score_matrix,
-        monte_carlo_probabilities=monte_carlo,
         max_goals=max_goals,
         model_version=MODEL_VERSION,
         locked=True,
