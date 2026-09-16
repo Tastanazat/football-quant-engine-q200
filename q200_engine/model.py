@@ -1,207 +1,331 @@
-from dataclasses import dataclass, asdict
-from typing import Dict, Any
+"""
+Q200 Engine - Model Layer
+
+Model oluşturma:
+1. TeamStats verilerinden lambda HOME / AWAY hesaplanır.
+2. Poisson dağılımı oluşturulur.
+3. 1X2 olasılıkları hesaplanır.
+4. Model çıktısı odds'tan bağımsızdır.
+
+Odds bu dosyada KULLANILMAZ.
+"""
+
+from __future__ import annotations
+
+from math import exp, factorial
+from typing import Any, Dict, Tuple
 
 
-@dataclass(frozen=True)
-class ModelSnapshot:
+# ---------------------------------------------------------
+# HELPERS
+# ---------------------------------------------------------
+
+def _get(obj: Any, *names: str, default: float = 0.0) -> float:
     """
-    Q200 modelinin kilitlenebilir snapshot'ı.
-
-    Odds aşamasından önce oluşturulur.
-    Model LOCK edildikten sonra odds verisi model parametrelerini
-    değiştiremez.
+    TeamStats nesnesinden farklı olası attribute isimlerini okur.
+    Dict desteklenir.
     """
+    if isinstance(obj, dict):
+        for name in names:
+            if name in obj:
+                return float(obj[name])
+        return float(default)
 
-    lambda_home: float
-    lambda_away: float
-    probabilities: Dict[str, float]
-    locked: bool = False
-    model_version: str = "Q200-V1"
+    for name in names:
+        if hasattr(obj, name):
+            value = getattr(obj, name)
+            if value is not None:
+                return float(value)
+
+    return float(default)
 
 
-class Q200Model:
+# ---------------------------------------------------------
+# LAMBDA
+# ---------------------------------------------------------
+
+def calculate_lambdas(stats: Any) -> Tuple[float, float]:
     """
-    Q200 model çekirdeği.
+    Q200 V3.x lambda hesaplaması.
 
-    Sorumlulukları:
-    - λ Home / λ Away üretmek
-    - Model olasılıklarını saklamak
-    - Model snapshot oluşturmak
-    - Modeli LOCK etmek
-    - LOCK sonrası modelin değiştirilmesini engellemek
-    """
+    FORMÜL:
 
-    def __init__(
-        self,
-        lambda_home: float,
-        lambda_away: float,
-        probabilities: Dict[str, float],
-        model_version: str = "Q200-V1",
-    ):
-        self._validate_lambda(lambda_home, "lambda_home")
-        self._validate_lambda(lambda_away, "lambda_away")
-        self._validate_probabilities(probabilities)
+    HOME =
+        0.35 * Home Home GF
+      + 0.35 * Away Away GA
+      + 0.15 * Home Home xG
+      + 0.15 * Away Away xGA
 
-        self._lambda_home = float(lambda_home)
-        self._lambda_away = float(lambda_away)
-        self._probabilities = dict(probabilities)
-        self._model_version = model_version
-        self._locked = False
+    AWAY =
+        0.35 * Away Away GF
+      + 0.35 * Home Home GA
+      + 0.15 * Away Away xG
+      + 0.15 * Home Home xGA
 
-    @staticmethod
-    def _validate_lambda(value: float, name: str) -> None:
-        if value < 0:
-            raise ValueError(f"{name} cannot be negative")
-
-    @staticmethod
-    def _validate_probabilities(
-        probabilities: Dict[str, float]
-    ) -> None:
-
-        required = {"HOME", "DRAW", "AWAY"}
-
-        if not isinstance(probabilities, dict):
-            raise TypeError("probabilities must be a dictionary")
-
-        missing = required - set(probabilities.keys())
-
-        if missing:
-            raise ValueError(
-                f"Missing probabilities: {sorted(missing)}"
-            )
-
-        for outcome in required:
-            probability = float(probabilities[outcome])
-
-            if probability < 0 or probability > 1:
-                raise ValueError(
-                    f"Invalid probability for {outcome}: "
-                    f"{probability}"
-                )
-
-        total = sum(
-            float(probabilities[outcome])
-            for outcome in required
-        )
-
-        # Küçük floating-point farklarına izin ver.
-        if abs(total - 1.0) > 1e-6:
-            raise ValueError(
-                f"Probabilities must sum to 1.0, got {total}"
-            )
-
-    @property
-    def lambda_home(self) -> float:
-        return self._lambda_home
-
-    @property
-    def lambda_away(self) -> float:
-        return self._lambda_away
-
-    @property
-    def probabilities(self) -> Dict[str, float]:
-        return dict(self._probabilities)
-
-    @property
-    def locked(self) -> bool:
-        return self._locked
-
-    @property
-    def model_version(self) -> str:
-        return self._model_version
-
-    def snapshot(self) -> ModelSnapshot:
-        """
-        Modelin mevcut durumunu immutable snapshot olarak döndürür.
-        """
-
-        return ModelSnapshot(
-            lambda_home=self._lambda_home,
-            lambda_away=self._lambda_away,
-            probabilities=dict(self._probabilities),
-            locked=self._locked,
-            model_version=self._model_version,
-        )
-
-    def lock(self) -> ModelSnapshot:
-        """
-        Modeli LOCK eder.
-
-        LOCK sonrası λ ve olasılıklar değiştirilemez.
-        """
-
-        self._locked = True
-
-        return self.snapshot()
-
-    def update(
-        self,
-        lambda_home: float,
-        lambda_away: float,
-        probabilities: Dict[str, float],
-    ) -> None:
-        """
-        Modeli günceller.
-
-        Model LOCK edilmişse güncelleme yasaktır.
-        """
-
-        if self._locked:
-            raise RuntimeError(
-                "Model is locked and cannot be modified"
-            )
-
-        self._validate_lambda(lambda_home, "lambda_home")
-        self._validate_lambda(lambda_away, "lambda_away")
-        self._validate_probabilities(probabilities)
-
-        self._lambda_home = float(lambda_home)
-        self._lambda_away = float(lambda_away)
-        self._probabilities = dict(probabilities)
-
-    def to_dict(self) -> Dict[str, Any]:
-        """
-        Model durumunu JSON/raporlama için dictionary olarak döndürür.
-        """
-
-        return {
-            "lambda_home": self._lambda_home,
-            "lambda_away": self._lambda_away,
-            "probabilities": dict(self._probabilities),
-            "locked": self._locked,
-            "model_version": self._model_version,
-        }
-
-
-def create_model(
-    lambda_home: float,
-    lambda_away: float,
-    probabilities: Dict[str, float],
-    model_version: str = "Q200-V1",
-) -> Q200Model:
-    """
-    Q200 model factory.
+    xG/xGA mevcut değilse ağırlıklar GF/GA tarafına
+    normalize edilir.
     """
 
-    return Q200Model(
-        lambda_home=lambda_home,
-        lambda_away=lambda_away,
-        probabilities=probabilities,
-        model_version=model_version,
+    # -------------------------
+    # HOME TEAM
+    # -------------------------
+
+    home_gf = _get(
+        stats,
+        "home_home_gf",
+        "home_gf",
+        "homeGF",
+        "home_goals_for",
     )
 
+    home_ga = _get(
+        stats,
+        "home_home_ga",
+        "home_ga",
+        "homeGA",
+        "home_goals_against",
+    )
 
-def lock_model(model: Q200Model) -> ModelSnapshot:
+    home_xg = _get(
+        stats,
+        "home_home_xg",
+        "home_xg",
+        "homeXG",
+        default=0.0,
+    )
+
+    home_xga = _get(
+        stats,
+        "home_home_xga",
+        "home_xga",
+        "homeXGA",
+        default=0.0,
+    )
+
+    # -------------------------
+    # AWAY TEAM
+    # -------------------------
+
+    away_gf = _get(
+        stats,
+        "away_away_gf",
+        "away_gf",
+        "awayGF",
+        "away_goals_for",
+    )
+
+    away_ga = _get(
+        stats,
+        "away_away_ga",
+        "away_ga",
+        "awayGA",
+        "away_goals_against",
+    )
+
+    away_xg = _get(
+        stats,
+        "away_away_xg",
+        "away_xg",
+        "awayXG",
+        default=0.0,
+    )
+
+    away_xga = _get(
+        stats,
+        "away_away_xga",
+        "away_xga",
+        "awayXGA",
+        default=0.0,
+    )
+
+    # -------------------------------------------------
+    # xG bilgisi gerçekten mevcut mu?
+    # -------------------------------------------------
+
+    xg_available = (
+        home_xg > 0
+        or home_xga > 0
+        or away_xg > 0
+        or away_xga > 0
+    )
+
+    if xg_available:
+        lambda_home = (
+            0.35 * home_gf
+            + 0.35 * away_ga
+            + 0.15 * home_xg
+            + 0.15 * away_xga
+        )
+
+        lambda_away = (
+            0.35 * away_gf
+            + 0.35 * home_ga
+            + 0.15 * away_xg
+            + 0.15 * home_xga
+        )
+
+    else:
+        # xG yoksa 35% + 35% = %70'lik GF/GA ağırlığını
+        # %100'e normalize ediyoruz.
+        lambda_home = (
+            0.50 * home_gf
+            + 0.50 * away_ga
+        )
+
+        lambda_away = (
+            0.50 * away_gf
+            + 0.50 * home_ga
+        )
+
+    # Güvenli sınırlar
+    lambda_home = max(0.01, float(lambda_home))
+    lambda_away = max(0.01, float(lambda_away))
+
+    return lambda_home, lambda_away
+
+
+# ---------------------------------------------------------
+# POISSON
+# ---------------------------------------------------------
+
+def poisson_pmf(k: int, lam: float) -> float:
+    """Poisson olasılığı."""
+    if k < 0:
+        return 0.0
+
+    return exp(-lam) * (lam ** k) / factorial(k)
+
+
+def build_score_matrix(
+    lambda_home: float,
+    lambda_away: float,
+    max_goals: int = 10,
+):
     """
-    Modeli dışarıdan LOCK etmek için yardımcı fonksiyon.
+    Ev sahibi / deplasman skor olasılık matrisi.
     """
 
-    return model.lock()
+    home_probs = [
+        poisson_pmf(i, lambda_home)
+        for i in range(max_goals + 1)
+    ]
+
+    away_probs = [
+        poisson_pmf(i, lambda_away)
+        for i in range(max_goals + 1)
+    ]
+
+    matrix = []
+
+    for h in range(max_goals + 1):
+        row = []
+
+        for a in range(max_goals + 1):
+            row.append(home_probs[h] * away_probs[a])
+
+        matrix.append(row)
+
+    return matrix
 
 
-def model_to_dict(model: Q200Model) -> Dict[str, Any]:
+# ---------------------------------------------------------
+# 1X2 PROBABILITIES
+# ---------------------------------------------------------
+
+def probabilities_from_lambdas(
+    lambda_home: float,
+    lambda_away: float,
+    max_goals: int = 10,
+) -> Dict[str, float]:
+
+    matrix = build_score_matrix(
+        lambda_home,
+        lambda_away,
+        max_goals=max_goals,
+    )
+
+    home = 0.0
+    draw = 0.0
+    away = 0.0
+
+    for h in range(max_goals + 1):
+        for a in range(max_goals + 1):
+
+            p = matrix[h][a]
+
+            if h > a:
+                home += p
+
+            elif h == a:
+                draw += p
+
+            else:
+                away += p
+
+    total = home + draw + away
+
+    if total <= 0:
+        raise ValueError("Model probabilities could not be calculated.")
+
+    home /= total
+    draw /= total
+    away /= total
+
+    return {
+        "HOME": home,
+        "DRAW": draw,
+        "AWAY": away,
+    }
+
+
+# ---------------------------------------------------------
+# MODEL BUILDER
+# ---------------------------------------------------------
+
+def build_model(
+    stats: Any,
+    max_goals: int = 10,
+) -> Dict[str, Any]:
     """
-    Modeli dictionary formatına çevirir.
+    Stats -> locked model output.
+
+    ÖNEMLİ:
+    Odds bu fonksiyona girmez.
+    Böylece model odds'tan bağımsız kalır.
     """
 
-    return model.to_dict()
+    lambda_home, lambda_away = calculate_lambdas(stats)
+
+    probabilities = probabilities_from_lambdas(
+        lambda_home,
+        lambda_away,
+        max_goals=max_goals,
+    )
+
+    score_matrix = build_score_matrix(
+        lambda_home,
+        lambda_away,
+        max_goals=max_goals,
+    )
+
+    return {
+        "lambda_home": lambda_home,
+        "lambda_away": lambda_away,
+        "probabilities": probabilities,
+        "score_matrix": score_matrix,
+        "max_goals": max_goals,
+        "model_locked": True,
+    }
+
+
+# ---------------------------------------------------------
+# BACKWARD COMPATIBILITY
+# ---------------------------------------------------------
+
+def model_probabilities(stats: Any) -> Dict[str, float]:
+    """
+    Eski kodlar için yardımcı fonksiyon.
+    """
+    model = build_model(stats)
+
+    return model["probabilities"]
