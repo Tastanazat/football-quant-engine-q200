@@ -809,3 +809,320 @@ def test_list_contains_match_result(
         records[0]["away_goals"]
         == 0
     )
+
+
+def test_new_history_record_has_no_settlement(
+    tmp_path,
+):
+
+    result = create_result(
+        tmp_path
+    )
+
+    history = AnalysisHistory(
+        tmp_path
+        / "history.sqlite"
+    )
+
+    record_id = history.save(
+        result,
+        "MATCH-NO-SETTLEMENT",
+    )
+
+    record = history.get(
+        record_id
+    )
+
+    assert record is not None
+
+    assert (
+        record["settlement_recorded"]
+        is False
+    )
+
+    assert (
+        record["settlement"]
+        is None
+    )
+
+    assert (
+        record["settlement_recorded_at"]
+        is None
+    )
+
+
+def test_settle_record_requires_match_result(
+    tmp_path,
+):
+
+    result = create_result(
+        tmp_path
+    )
+
+    history = AnalysisHistory(
+        tmp_path
+        / "history.sqlite"
+    )
+
+    record_id = history.save(
+        result,
+        "MATCH-SETTLE-REQUIRES-RESULT",
+    )
+
+    with pytest.raises(
+        ValueError
+    ):
+
+        history.settle_record(
+            record_id
+        )
+
+
+def test_settle_record_persists_settlement(
+    tmp_path,
+):
+
+    result = create_result(
+        tmp_path
+    )
+
+    history = AnalysisHistory(
+        tmp_path
+        / "history.sqlite"
+    )
+
+    record_id = history.save(
+        result,
+        "MATCH-SETTLE-PERSIST",
+    )
+
+    history.record_result(
+        record_id,
+        2,
+        1,
+    )
+
+    settlement = history.settle_record(
+        record_id
+    )
+
+    assert (
+        settlement["record_id"]
+        == record_id
+    )
+
+    assert (
+        settlement["home_goals"]
+        == 2
+    )
+
+    assert (
+        settlement["away_goals"]
+        == 1
+    )
+
+    record = history.get(
+        record_id
+    )
+
+    assert record is not None
+
+    assert (
+        record["settlement_recorded"]
+        is True
+    )
+
+    assert (
+        record["settlement"]
+        == settlement
+    )
+
+    assert (
+        record["settlement_recorded_at"]
+        is not None
+    )
+
+
+def test_settlement_persists_between_history_instances(
+    tmp_path,
+):
+
+    result = create_result(
+        tmp_path
+    )
+
+    db = (
+        tmp_path
+        / "history.sqlite"
+    )
+
+    first = AnalysisHistory(
+        db
+    )
+
+    record_id = first.save(
+        result,
+        "MATCH-SETTLE-PERSIST-2",
+    )
+
+    first.record_result(
+        record_id,
+        1,
+        0,
+    )
+
+    settlement = first.settle_record(
+        record_id
+    )
+
+    second = AnalysisHistory(
+        db
+    )
+
+    record = second.get(
+        record_id
+    )
+
+    assert record is not None
+
+    assert (
+        record["settlement_recorded"]
+        is True
+    )
+
+    assert (
+        record["settlement"]
+        == settlement
+    )
+
+
+def test_record_result_invalidates_previous_settlement(
+    tmp_path,
+):
+
+    result = create_result(
+        tmp_path
+    )
+
+    history = AnalysisHistory(
+        tmp_path
+        / "history.sqlite"
+    )
+
+    record_id = history.save(
+        result,
+        "MATCH-SETTLE-INVALIDATE",
+    )
+
+    history.record_result(
+        record_id,
+        2,
+        1,
+    )
+
+    history.settle_record(
+        record_id
+    )
+
+    before = history.get(
+        record_id
+    )
+
+    assert before is not None
+    assert (
+        before["settlement_recorded"]
+        is True
+    )
+    assert (
+        before["settlement"]
+        is not None
+    )
+
+    history.record_result(
+        record_id,
+        3,
+        2,
+    )
+
+    after = history.get(
+        record_id
+    )
+
+    assert after is not None
+
+    assert (
+        after["home_goals"]
+        == 3
+    )
+
+    assert (
+        after["away_goals"]
+        == 2
+    )
+
+    assert (
+        after["settlement_recorded"]
+        is False
+    )
+
+    assert (
+        after["settlement"]
+        is None
+    )
+
+    assert (
+        after["settlement_recorded_at"]
+        is None
+    )
+
+
+def test_record_settlement_rejects_score_mismatch(
+    tmp_path,
+):
+
+    result = create_result(
+        tmp_path
+    )
+
+    history = AnalysisHistory(
+        tmp_path
+        / "history.sqlite"
+    )
+
+    record_id = history.save(
+        result,
+        "MATCH-SETTLE-SCORE-MISMATCH",
+    )
+
+    history.record_result(
+        record_id,
+        2,
+        1,
+    )
+
+    settlement = {
+        "record_id": record_id,
+        "match_id": "MATCH-SETTLE-SCORE-MISMATCH",
+        "home_goals": 3,
+        "away_goals": 0,
+        "selections": [],
+        "summary": {
+            "total_bets": 0,
+            "wins": 0,
+            "losses": 0,
+            "voids": 0,
+            "total_stake": 0.0,
+            "total_profit": 0.0,
+            "roi": 0.0,
+            "hit_rate": 0.0,
+        },
+    }
+
+    with pytest.raises(
+        ValueError
+    ):
+
+        history.record_settlement(
+            record_id,
+            settlement,
+        )
