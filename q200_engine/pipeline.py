@@ -40,6 +40,9 @@ Odds modeli değiştiremez.
 Model önce oluşturulur ve LOCK edilir.
 Stress Test model Lambda değerlerinden bağımsız
 senaryolar üretir.
+
+Selection yalnızca Odds dosyasında bulunan
+marketleri değerlendirebilir.
 """
 
 from __future__ import annotations
@@ -145,7 +148,7 @@ class Q200Pipeline:
     @property
     def probabilities(self) -> dict[str, float]:
         """
-        LOCK edilmiş baseline model olasılıkları.
+        LOCK edilmiş baseline model olasılıklarını döndürür.
         """
 
         return dict(
@@ -169,8 +172,16 @@ class Q200Pipeline:
         Returns:
 
             {
-                "lambdas": {...},
-                "probabilities": {...},
+                "lambdas": {
+                    "OPTIMISTIC": {...},
+                    "BASELINE": {...},
+                    "PESSIMISTIC": {...},
+                },
+                "probabilities": {
+                    "OPTIMISTIC": {...},
+                    "BASELINE": {...},
+                    "PESSIMISTIC": {...},
+                }
             }
         """
 
@@ -214,12 +225,17 @@ class Q200Pipeline:
 
         Pessimistic stress:
 
-            Selection
+            Pessimistic Probability
             Pessimistic EV
+            Selection
+            Kelly
 
         ÖNEMLİ:
 
             Odds modeli değiştiremez.
+
+        Ayrıca Selection yalnızca Odds içinde
+        bulunan marketleri değerlendirir.
         """
 
         # =================================================
@@ -300,7 +316,7 @@ class Q200Pipeline:
         # BASELINE FAIR ODDS
         # =================================================
 
-        fair_odds = {}
+        fair_odds: dict[str, float] = {}
 
         for outcome, probability in (
             baseline_probabilities.items()
@@ -317,7 +333,7 @@ class Q200Pipeline:
         # BASELINE EV
         # =================================================
 
-        baseline_ev = {}
+        baseline_ev: dict[str, float] = {}
 
         for outcome, odd in (
             normalized_odds.items()
@@ -357,10 +373,46 @@ class Q200Pipeline:
         )
 
         # =================================================
+        # ODDS / MARKET MATCH
+        # =================================================
+        #
+        # Stress Test bütün marketleri üretir.
+        #
+        # Örneğin:
+        #
+        # HOME
+        # DRAW
+        # AWAY
+        # OVER_0.5
+        # UNDER_0.5
+        # ...
+        # BTTS_YES
+        # BTTS_NO
+        #
+        # Ancak Selection yalnızca Odds dosyasında
+        # bulunan marketleri değerlendirmelidir.
+        #
+        # Böylece:
+        #
+        # 1X2 odds      -> 3 selection
+        # 1X2 + BTTS    -> ilgili marketler
+        # vb.
+        #
+        # Odds modeli değiştirmez.
+        # Sadece hangi marketlerin analiz edileceğini belirler.
+        # =================================================
+
+        selection_probabilities = {
+            outcome: pessimistic_probabilities[outcome]
+            for outcome in normalized_odds
+            if outcome in pessimistic_probabilities
+        }
+
+        # =================================================
         # PESSIMISTIC EV
         # =================================================
 
-        pessimistic_ev = {}
+        pessimistic_ev: dict[str, float] = {}
 
         for outcome, odd in (
             normalized_odds.items()
@@ -384,13 +436,16 @@ class Q200Pipeline:
         # Selection değerlendirmesinde PESSIMISTIC
         # probability kullanılır.
         #
-        # Böylece normal model sonucu yerine
-        # stress edilmiş senaryoda hâlâ uygun olan
-        # seçimler öne çıkar.
+        # Ancak sadece Odds dosyasında bulunan
+        # marketler Selection'a gönderilir.
+        #
+        # Böylece stress katmanı bütün marketleri
+        # üretebilirken selection katmanı yalnızca
+        # gerçek odds bulunan marketleri değerlendirir.
         # =================================================
 
         selections = select(
-            pessimistic_probabilities,
+            selection_probabilities,
             normalized_odds,
             validated_bankroll,
             uncertainty=uncertainty,
