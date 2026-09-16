@@ -98,6 +98,7 @@ def test_history_creates_database(
 
     assert db.exists()
     assert history.count() == 0
+    assert history.count_completed() == 0
 
 
 def test_save_and_get_analysis(
@@ -120,6 +121,7 @@ def test_save_and_get_analysis(
 
     assert record_id == 1
     assert history.count() == 1
+    assert history.count_completed() == 0
 
     record = history.get(
         record_id
@@ -145,6 +147,21 @@ def test_save_and_get_analysis(
     assert (
         record["report_version"]
         == "Q200-REPORT-V1"
+    )
+
+    assert (
+        record["result_recorded"]
+        is False
+    )
+
+    assert (
+        record["home_goals"]
+        is None
+    )
+
+    assert (
+        record["away_goals"]
+        is None
     )
 
     assert (
@@ -294,13 +311,6 @@ def test_delete_analysis(
     )
 
     assert history.count() == 0
-
-    assert (
-        history.delete(
-            record_id
-        )
-        is False
-    )
 
 
 def test_missing_record_returns_none(
@@ -461,7 +471,7 @@ def test_history_schema_version_is_defined():
 
     assert (
         HISTORY_SCHEMA_VERSION
-        == "Q200-HISTORY-V1"
+        == "Q200-HISTORY-V2"
     )
 
 
@@ -520,4 +530,282 @@ def test_existing_result_is_not_mutated_by_save(
     assert (
         result.selections
         == before["selections"]
+    )
+
+
+def test_record_match_result(
+    tmp_path,
+):
+
+    result = create_result(
+        tmp_path
+    )
+
+    history = AnalysisHistory(
+        tmp_path
+        / "history.sqlite"
+    )
+
+    record_id = history.save(
+        result,
+        "MATCH-RESULT",
+    )
+
+    assert (
+        history.record_result(
+            record_id,
+            2,
+            1,
+        )
+        is True
+    )
+
+    record = history.get(
+        record_id
+    )
+
+    assert record is not None
+
+    assert (
+        record["result_recorded"]
+        is True
+    )
+
+    assert (
+        record["home_goals"]
+        == 2
+    )
+
+    assert (
+        record["away_goals"]
+        == 1
+    )
+
+    assert (
+        record["result_recorded_at"]
+        is not None
+    )
+
+    assert (
+        history.count_completed()
+        == 1
+    )
+
+
+def test_record_result_can_be_updated(
+    tmp_path,
+):
+
+    result = create_result(
+        tmp_path
+    )
+
+    history = AnalysisHistory(
+        tmp_path
+        / "history.sqlite"
+    )
+
+    record_id = history.save(
+        result,
+        "MATCH-UPDATE",
+    )
+
+    history.record_result(
+        record_id,
+        1,
+        0,
+    )
+
+    history.record_result(
+        record_id,
+        3,
+        2,
+    )
+
+    record = history.get(
+        record_id
+    )
+
+    assert record is not None
+
+    assert (
+        record["home_goals"]
+        == 3
+    )
+
+    assert (
+        record["away_goals"]
+        == 2
+    )
+
+    assert (
+        history.count_completed()
+        == 1
+    )
+
+
+def test_record_result_missing_record(
+    tmp_path,
+):
+
+    history = AnalysisHistory(
+        tmp_path
+        / "history.sqlite"
+    )
+
+    assert (
+        history.record_result(
+            999,
+            2,
+            1,
+        )
+        is False
+    )
+
+
+def test_record_result_rejects_invalid_record_id(
+    tmp_path,
+):
+
+    history = AnalysisHistory(
+        tmp_path
+        / "history.sqlite"
+    )
+
+    with pytest.raises(
+        TypeError
+    ):
+
+        history.record_result(
+            "1",
+            2,
+            1,
+        )
+
+    with pytest.raises(
+        ValueError
+    ):
+
+        history.record_result(
+            0,
+            2,
+            1,
+        )
+
+
+def test_record_result_rejects_invalid_goals(
+    tmp_path,
+):
+
+    result = create_result(
+        tmp_path
+    )
+
+    history = AnalysisHistory(
+        tmp_path
+        / "history.sqlite"
+    )
+
+    record_id = history.save(
+        result,
+        "MATCH-INVALID-GOALS",
+    )
+
+    with pytest.raises(
+        TypeError
+    ):
+
+        history.record_result(
+            record_id,
+            "2",
+            1,
+        )
+
+    with pytest.raises(
+        TypeError
+    ):
+
+        history.record_result(
+            record_id,
+            2,
+            "1",
+        )
+
+    with pytest.raises(
+        ValueError
+    ):
+
+        history.record_result(
+            record_id,
+            -1,
+            1,
+        )
+
+    with pytest.raises(
+        ValueError
+    ):
+
+        history.record_result(
+            record_id,
+            2,
+            -1,
+        )
+
+    with pytest.raises(
+        TypeError
+    ):
+
+        history.record_result(
+            record_id,
+            True,
+            1,
+        )
+
+
+def test_list_contains_match_result(
+    tmp_path,
+):
+
+    result = create_result(
+        tmp_path
+    )
+
+    history = AnalysisHistory(
+        tmp_path
+        / "history.sqlite"
+    )
+
+    record_id = history.save(
+        result,
+        "MATCH-LIST-RESULT",
+    )
+
+    history.record_result(
+        record_id,
+        2,
+        0,
+    )
+
+    records = history.list()
+
+    assert len(records) == 1
+
+    assert (
+        records[0]["match_id"]
+        == "MATCH-LIST-RESULT"
+    )
+
+    assert (
+        records[0]["result_recorded"]
+        is True
+    )
+
+    assert (
+        records[0]["home_goals"]
+        == 2
+    )
+
+    assert (
+        records[0]["away_goals"]
+        == 0
     )
