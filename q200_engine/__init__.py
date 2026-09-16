@@ -72,7 +72,9 @@ from .settlement import (
 from .performance import (
     PERFORMANCE_VERSION,
     PerformanceSummary,
+    MarketPerformance,
     summarize_history,
+    market_performance,
 )
 
 
@@ -118,5 +120,7 @@ __all__ = [
 
     "PERFORMANCE_VERSION",
     "PerformanceSummary",
+    "MarketPerformance",
     "summarize_history",
+    "market_performance",
 ]
