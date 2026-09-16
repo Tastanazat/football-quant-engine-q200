@@ -53,6 +53,27 @@ class PerformanceSummary:
         return self.total_profit
 
 
+@dataclass(frozen=True)
+class MarketPerformance:
+    """Tek bir selection outcome için performans özeti."""
+
+    market: str
+    total_bets: int
+    wins: int
+    losses: int
+    voids: int
+    total_stake: float
+    total_profit: float
+    roi: float
+    hit_rate: float
+
+    @property
+    def profit(self) -> float:
+        """Geriye dönük kullanım için total_profit alias'ı."""
+
+        return self.total_profit
+
+
 def _validate_bankroll(
     value: Any,
 ) -> float:
@@ -165,6 +186,259 @@ def _number(
 
         raise ValueError(
             f"{name} sonlu bir sayı olmalıdır."
+        )
+
+    return result
+
+
+def market_performance(
+    history,
+) -> dict[str, MarketPerformance]:
+    """
+    Settlement kayıtlarını selection outcome bazında gruplar.
+
+    Örnek market anahtarları:
+
+    HOME
+    DRAW
+    AWAY
+    OVER_2.5
+    UNDER_2.5
+    BTTS_YES
+    BTTS_NO
+
+    veya settlement katmanının kullandığı diğer outcome değerleri.
+    """
+
+    _validate_history(
+        history
+    )
+
+    total_analysis_records = history.count()
+
+    if total_analysis_records > 0:
+
+        records = history.list(
+            limit=total_analysis_records
+        )
+
+    else:
+
+        records = []
+
+    aggregates: dict[
+        str,
+        dict[str, float | int],
+    ] = {}
+
+    for item in records:
+
+        if item.get(
+            "settlement_recorded"
+        ) is not True:
+
+            continue
+
+        record = history.get(
+            item["id"]
+        )
+
+        if record is None:
+
+            continue
+
+        settlement = record.get(
+            "settlement"
+        )
+
+        if not isinstance(
+            settlement,
+            dict,
+        ):
+
+            raise ValueError(
+                "Settlement kaydı dictionary olmalıdır."
+            )
+
+        selections = settlement.get(
+            "selections"
+        )
+
+        if not isinstance(
+            selections,
+            list,
+        ):
+
+            raise ValueError(
+                "Settlement selections list olmalıdır."
+            )
+
+        for selection in selections:
+
+            if not isinstance(
+                selection,
+                dict,
+            ):
+
+                raise ValueError(
+                    "Settlement selection dictionary olmalıdır."
+                )
+
+            market = str(
+                selection.get(
+                    "outcome",
+                    "",
+                )
+            ).strip().upper()
+
+            if not market:
+
+                raise ValueError(
+                    "Settlement selection outcome boş olamaz."
+                )
+
+            outcome = str(
+                selection.get(
+                    "settlement",
+                    "",
+                )
+            ).strip().upper()
+
+            if outcome not in {
+                "WIN",
+                "LOSS",
+                "VOID",
+            }:
+
+                raise ValueError(
+                    "Geçersiz settlement sonucu: "
+                    f"{selection.get('settlement')}"
+                )
+
+            stake = _number(
+                selection.get(
+                    "stake"
+                ),
+                "stake",
+            )
+
+            profit = _number(
+                selection.get(
+                    "profit"
+                ),
+                "profit",
+            )
+
+            if stake < 0:
+
+                raise ValueError(
+                    "Settlement stake negatif olamaz."
+                )
+
+            bucket = aggregates.setdefault(
+                market,
+                {
+                    "total_bets": 0,
+                    "wins": 0,
+                    "losses": 0,
+                    "voids": 0,
+                    "total_stake": 0.0,
+                    "total_profit": 0.0,
+                },
+            )
+
+            bucket["total_bets"] += 1
+            bucket["total_stake"] += stake
+            bucket["total_profit"] += profit
+
+            if outcome == "WIN":
+
+                bucket["wins"] += 1
+
+            elif outcome == "LOSS":
+
+                bucket["losses"] += 1
+
+            else:
+
+                bucket["voids"] += 1
+
+    result: dict[
+        str,
+        MarketPerformance,
+    ] = {}
+
+    for market in sorted(
+        aggregates
+    ):
+
+        bucket = aggregates[
+            market
+        ]
+
+        total_stake = float(
+            bucket[
+                "total_stake"
+            ]
+        )
+
+        total_profit = float(
+            bucket[
+                "total_profit"
+            ]
+        )
+
+        wins = int(
+            bucket[
+                "wins"
+            ]
+        )
+
+        losses = int(
+            bucket[
+                "losses"
+            ]
+        )
+
+        roi = (
+            total_profit
+            / total_stake
+            if total_stake > 0
+            else 0.0
+        )
+
+        settled_bets = (
+            wins
+            + losses
+        )
+
+        hit_rate = (
+            wins
+            / settled_bets
+            if settled_bets > 0
+            else 0.0
+        )
+
+        result[
+            market
+        ] = MarketPerformance(
+            market=market,
+            total_bets=int(
+                bucket[
+                    "total_bets"
+                ]
+            ),
+            wins=wins,
+            losses=losses,
+            voids=int(
+                bucket[
+                    "voids"
+                ]
+            ),
+            total_stake=total_stake,
+            total_profit=total_profit,
+            roi=roi,
+            hit_rate=hit_rate,
         )
 
     return result
