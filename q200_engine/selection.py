@@ -58,19 +58,13 @@ def _validate_probability(
     probability: float,
     outcome: str,
 ) -> float:
-    """
-    Model olasılığını doğrular.
-
-    Beklenen aralık:
-        0.0 <= probability <= 1.0
-    """
+    """Model olasılığını doğrular."""
 
     try:
         value = float(probability)
     except (TypeError, ValueError):
         raise ValueError(
-            f"Invalid probability for {outcome}: "
-            f"{probability}"
+            f"Invalid probability for {outcome}: {probability}"
         )
 
     if not isfinite(value):
@@ -80,8 +74,7 @@ def _validate_probability(
 
     if value < 0.0 or value > 1.0:
         raise ValueError(
-            f"Probability must be between 0 and 1 "
-            f"for {outcome}"
+            f"Probability must be between 0 and 1 for {outcome}"
         )
 
     return value
@@ -91,9 +84,7 @@ def _validate_odds(
     odd: float,
     outcome: str,
 ) -> float:
-    """
-    Odds değerini doğrular.
-    """
+    """Odds değerini doğrular."""
 
     try:
         value = float(odd)
@@ -109,8 +100,7 @@ def _validate_odds(
 
     if value <= 1.0:
         raise ValueError(
-            f"Odds must be greater than 1.0 "
-            f"for {outcome}"
+            f"Odds must be greater than 1.0 for {outcome}"
         )
 
     return value
@@ -119,9 +109,7 @@ def _validate_odds(
 def _validate_bankroll(
     bankroll: float,
 ) -> float:
-    """
-    Bankroll değerini doğrular.
-    """
+    """Bankroll değerini doğrular."""
 
     try:
         value = float(bankroll)
@@ -146,23 +134,14 @@ def _validate_bankroll(
 def _normalize_uncertainty(
     uncertainty: str,
 ) -> str:
-    """
-    Belirsizlik seviyesini normalize eder.
-    """
+    """Belirsizlik seviyesini normalize eder."""
 
-    if not isinstance(
-        uncertainty,
-        str,
-    ):
+    if not isinstance(uncertainty, str):
         raise TypeError(
             "uncertainty must be a string"
         )
 
-    value = (
-        uncertainty
-        .strip()
-        .upper()
-    )
+    value = uncertainty.strip().upper()
 
     if value not in VALID_UNCERTAINTY:
         raise ValueError(
@@ -212,18 +191,12 @@ def select(
     # INPUT VALIDATION
     # =====================================================
 
-    if not isinstance(
-        probabilities,
-        dict,
-    ):
+    if not isinstance(probabilities, dict):
         raise TypeError(
             "probabilities must be a dictionary"
         )
 
-    if not isinstance(
-        odds,
-        dict,
-    ):
+    if not isinstance(odds, dict):
         raise TypeError(
             "odds must be a dictionary"
         )
@@ -256,11 +229,9 @@ def select(
 
         for outcome, probability in probabilities.items():
 
-            validated_probability = (
-                _validate_probability(
-                    probability,
-                    outcome,
-                )
+            validated_probability = _validate_probability(
+                probability,
+                outcome,
             )
 
             odd = odds.get(outcome)
@@ -304,15 +275,13 @@ def select(
 
     for outcome, probability in probabilities.items():
 
-        validated_probability = (
-            _validate_probability(
-                probability,
-                outcome,
-            )
+        validated_probability = _validate_probability(
+            probability,
+            outcome,
         )
 
         # -------------------------------------------------
-        # ODDS YOKSA BU MARKET ANALİZ EDİLMEZ
+        # ODDS YOKSA ANALİZ DIŞI
         # -------------------------------------------------
 
         if outcome not in odds:
@@ -409,7 +378,7 @@ def select(
             reason = "FILTERED"
 
         # -------------------------------------------------
-        # RESULT ROW
+        # RESULT
         # -------------------------------------------------
 
         rows.append({
@@ -430,6 +399,27 @@ def select(
     if not rows:
         raise ValueError(
             "Geçerli selection bulunamadı."
+        )
+
+    # =====================================================
+    # CRITICAL MINIMUM ODDS FILTER
+    # =====================================================
+    #
+    # Q200 V3.1 test beklentisi:
+    #
+    # Eğer analiz edilen tüm oranlar 1.50 altındaysa
+    # selection motoru ValueError vermelidir.
+    #
+    # Bu davranış özellikle korunmaktadır.
+    # =====================================================
+
+    if all(
+        row["odds"] < MINIMUM_ODDS
+        for row in rows
+    ):
+        raise ValueError(
+            "Minimum odds filter: "
+            f"tüm oranlar {MINIMUM_ODDS:.2f} altında."
         )
 
     # =====================================================
