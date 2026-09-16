@@ -3,7 +3,7 @@ Q200 Engine - Model Layer
 
 Q200 V3.1
 
-STAGE 1:
+Stage 1:
 
 Statistics
     ↓
@@ -69,15 +69,7 @@ MONTE_CARLO_ITERATIONS = 100_000
 
 def _valid(value: Optional[float]) -> bool:
     """
-    Bir istatistik değerinin kullanılabilir olup olmadığını
-    kontrol eder.
-
-    Geçerli değerler:
-
-    - None değil
-    - int veya float
-    - finite
-    - negatif değil
+    Değerin kullanılabilir olup olmadığını kontrol eder.
     """
 
     return (
@@ -99,17 +91,7 @@ def _weighted_average(
     """
     Mevcut istatistikleri ağırlıklı olarak birleştirir.
 
-    Bir istatistik eksikse mevcut istatistiklerin ağırlıkları
-    kendi aralarında normalize edilir.
-
-    Örneğin:
-
-        GF   = 2.0 -> 0.35
-        GA   = 1.8 -> 0.35
-        xG   = None
-        xGA  = 1.4 -> 0.15
-
-    Eksik veri nedeniyle mevcut ağırlıklar normalize edilir.
+    Eksik veri varsa mevcut ağırlıkları normalize eder.
     """
 
     available = [
@@ -165,11 +147,15 @@ def calculate_lambdas(
       + 0.15 * Away xG
       + 0.15 * Home xGA
 
-    xG/xGA eksikse mevcut bileşenlerin ağırlıkları
-    normalize edilir.
+    xG/xGA eksikse mevcut ağırlıklar normalize edilir.
 
-    KRİTİK:
-    Odds kesinlikle kullanılmaz.
+    LEGACY:
+
+    Eski 7 parametreli TeamStats kullanımında
+    away_xg bulunmadığı için away_xga değeri
+    away_xg için fallback olarak kullanılır.
+
+    Odds bu fonksiyonda kullanılmaz.
     """
 
     if not isinstance(stats, TeamStats):
@@ -204,6 +190,28 @@ def calculate_lambdas(
     )
 
     # -----------------------------------------------------
+    # AWAY xG
+    # -----------------------------------------------------
+    #
+    # Yeni yapı:
+    #
+    #     away_xg
+    #
+    # Legacy 7-parametreli yapı:
+    #
+    #     away_xga
+    #
+    # Eski testlerin ve eski kullanımın bozulmaması
+    # için away_xg yoksa away_xga fallback olarak kullanılır.
+    # -----------------------------------------------------
+
+    away_xg = (
+        stats.away_xg
+        if _valid(stats.away_xg)
+        else stats.away_xga
+    )
+
+    # -----------------------------------------------------
     # AWAY LAMBDA
     # -----------------------------------------------------
 
@@ -218,7 +226,7 @@ def calculate_lambdas(
                 HOME_GA_WEIGHT,
             ),
             (
-                stats.away_xg,
+                away_xg,
                 AWAY_XG_WEIGHT,
             ),
             (
@@ -273,9 +281,7 @@ def build_model(
           ↓
         LOCK
 
-    KRİTİK KURAL:
-
-        Odds bu fonksiyona girmez.
+    Odds bu fonksiyona girmez.
     """
 
     # -----------------------------------------------------
@@ -332,12 +338,6 @@ def build_model(
     # STEP 4
     # MONTE CARLO
     # -----------------------------------------------------
-
-    # Monte Carlo burada çalıştırılır.
-    #
-    # ModelSnapshot şemasına ayrıca yeni bir alan
-    # eklemiyoruz. Böylece mevcut schema.py ile uyum
-    # korunur.
 
     monte_carlo = simulate_match(
         lambda_home,
