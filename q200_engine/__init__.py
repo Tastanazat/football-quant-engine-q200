@@ -44,6 +44,10 @@ from .pipeline import (
     Q200Pipeline,
 )
 
+from .file_pipeline import (
+    run_pipeline_from_files,
+)
+
 
 __all__ = [
     "TeamStats",
@@ -69,4 +73,6 @@ __all__ = [
     "quarter_kelly",
 
     "Q200Pipeline",
+
+    "run_pipeline_from_files",
 ]
