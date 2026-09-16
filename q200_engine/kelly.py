@@ -1,17 +1,72 @@
-def kelly_fraction(probability, odds):
+"""
+Q200 Engine - Kelly
+
+Q200 V3.1
+
+Maximum bankroll risk:
+%2
+
+Quarter Kelly:
+%25 Kelly
+"""
+
+from __future__ import annotations
+
+
+MAX_BANKROLL_RISK = 0.02
+QUARTER_KELLY = 0.25
+
+
+def quarter_kelly(
+    probability: float,
+    odds: float,
+    bankroll: float,
+) -> dict[str, float]:
+
+    if not 0 <= probability <= 1:
+        raise ValueError(
+            "Probability 0-1 arasında olmalıdır."
+        )
+
+    if odds <= 1:
+        raise ValueError(
+            "Odds 1'den büyük olmalıdır."
+        )
+
+    if bankroll <= 0:
+        raise ValueError(
+            "Bankroll pozitif olmalıdır."
+        )
+
     b = odds - 1.0
-    if b <= 0:
-        return 0.0
+
     q = 1.0 - probability
-    return max(0.0, (b * probability - q) / b)
 
+    full_kelly = (
+        (b * probability - q) / b
+    )
 
-def quarter_kelly(probability, odds, bankroll, max_risk=0.02):
-    raw = kelly_fraction(probability, odds)
-    fraction = min(raw / 4.0, max_risk)
+    if full_kelly < 0:
+        full_kelly = 0.0
+
+    quarter = (
+        full_kelly
+        * QUARTER_KELLY
+    )
+
+    max_stake = (
+        bankroll
+        * MAX_BANKROLL_RISK
+    )
+
+    stake = min(
+        bankroll * quarter,
+        max_stake,
+    )
+
     return {
-        "kelly_fraction": raw,
-        "quarter_kelly_fraction": raw / 4.0,
-        "risk_fraction": fraction,
-        "stake": bankroll * fraction,
+        "full_kelly": full_kelly,
+        "quarter_kelly": quarter,
+        "stake": stake,
+        "risk_cap": max_stake,
     }
