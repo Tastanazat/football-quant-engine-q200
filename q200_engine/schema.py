@@ -1,23 +1,47 @@
-from dataclasses import dataclass
-from typing import Dict, Optional
+"""
+Q200 Engine - Schema Layer
+
+Veri modelleri ve tip tanımları.
+
+Q200 V3.1
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
 
 
-@dataclass
+# =========================================================
+# TEAM STATS
+# =========================================================
+
+@dataclass(frozen=True)
 class TeamStats:
     """
     Q200 takım istatistikleri.
 
-    Yeni şema:
-        home_gf
-        home_ga
-        away_gf
-        away_ga
-        home_xg
-        home_xga
-        away_xg
-        away_xga
+    Alan sırası:
 
-    Eski 7-parametreli testlerle uyumluluk:
+        1. home_gf
+        2. home_ga
+        3. away_gf
+        4. away_ga
+        5. home_xg
+        6. home_xga
+        7. away_xga
+        8. away_xg
+
+    İlk 3 alan zorunludur.
+
+    Eski testler:
+
+        TeamStats(2, 1, 1)
+
+    şeklinde çalışabilir.
+
+    Eski 7 parametreli yapı:
+
         TeamStats(
             home_gf,
             home_ga,
@@ -25,36 +49,53 @@ class TeamStats:
             away_ga,
             home_xg,
             home_xga,
-            away_xga
+            away_xga,
         )
 
-    Yani 7. positional değer AWAY xGA olarak kabul edilir.
+    şeklinde korunur.
+
+    Yeni kullanımda away_xg ayrıca verilebilir.
     """
 
-    home_gf: float = 0.0
-    home_ga: float = 0.0
+    home_gf: float
+    home_ga: float
+    away_gf: float
 
-    away_gf: float = 0.0
     away_ga: float = 0.0
 
     home_xg: Optional[float] = None
     home_xga: Optional[float] = None
 
-    # Eski testlerle uyumluluk için:
+    # 7. alan legacy testlerle uyumluluk için away_xga
     away_xga: Optional[float] = None
 
-    # Yeni API için AWAY xG
+    # 8. alan yeni standart away xG
     away_xg: Optional[float] = None
 
 
+# =========================================================
+# MODEL SNAPSHOT
+# =========================================================
+
 @dataclass(frozen=True)
 class ModelSnapshot:
+    """
+    LOCK edilmiş model çıktısı.
+
+    Odds bu nesneyi değiştiremez.
+    """
+
     lambda_home: float
     lambda_away: float
+
     probabilities: Dict[str, float]
+
     score_matrix: list
+
     max_goals: int = 10
+
     model_version: str = "Q200-V3.1"
+
     locked: bool = True
 
     @property
@@ -62,16 +103,47 @@ class ModelSnapshot:
         return self.locked
 
 
+# =========================================================
+# ODDS INPUT
+# =========================================================
+
 @dataclass(frozen=True)
 class OddsInput:
+    """
+    Odds katmanı.
+
+    Model katmanından bağımsızdır.
+    """
+
     market: str
+
     odds: Dict[str, float]
 
 
+# =========================================================
+# ANALYSIS RESULT
+# =========================================================
+
 @dataclass
 class AnalysisResult:
+    """
+    Pipeline nihai analiz sonucu.
+    """
+
     snapshot: ModelSnapshot
-    fair_odds: Dict[str, float]
-    no_vig_probabilities: Dict[str, float]
-    ev: Dict[str, float]
-    selections: list
+
+    fair_odds: Dict[str, float] = field(
+        default_factory=dict
+    )
+
+    no_vig_probabilities: Dict[str, float] = field(
+        default_factory=dict
+    )
+
+    ev: Dict[str, float] = field(
+        default_factory=dict
+    )
+
+    selections: List[dict] = field(
+        default_factory=list
+    )
