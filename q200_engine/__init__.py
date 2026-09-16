@@ -64,6 +64,11 @@ from .history import (
     AnalysisHistory,
 )
 
+from .settlement import (
+    SETTLEMENT_VERSION,
+    settle_analysis_record,
+)
+
 
 __all__ = [
     "TeamStats",
@@ -101,4 +106,7 @@ __all__ = [
 
     "HISTORY_SCHEMA_VERSION",
     "AnalysisHistory",
+
+    "SETTLEMENT_VERSION",
+    "settle_analysis_record",
 ]
