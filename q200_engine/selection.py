@@ -17,9 +17,16 @@ UNCERTAINTY THRESHOLD
         ↓
 KELLY
         ↓
-BANKROLL RISK
+PORTFOLIO RISK CAP
         ↓
 SELECTION / NO BET
+
+KRİTİK KURAL:
+
+Toplam bankroll riski maksimum %2'dir.
+
+Birden fazla seçim uygun olsa bile
+toplam stake bankroll'un %2'sini geçemez.
 """
 
 from __future__ import annotations
@@ -35,6 +42,8 @@ from .odds import expected_value
 # =========================================================
 
 MINIMUM_ODDS = 1.50
+
+MAX_BANKROLL_RISK = 0.02
 
 EV_THRESHOLDS = {
     "LOW": 0.05,
@@ -153,6 +162,72 @@ def _normalize_uncertainty(
 
 
 # =========================================================
+# PORTFOLIO RISK CAP
+# =========================================================
+
+def _apply_portfolio_risk_cap(
+    rows: list[dict],
+    bankroll: float,
+) -> list[dict]:
+    """
+    Toplam bankroll riskini maksimum %2 ile sınırlar.
+
+    Önce eligible seçimlerin Kelly stake toplamı hesaplanır.
+
+    Eğer toplam stake %2 bankroll sınırını aşmıyorsa
+    hiçbir değişiklik yapılmaz.
+
+    Eğer toplam stake %2 sınırını aşıyorsa,
+    tüm eligible stake değerleri aynı oranda küçültülür.
+
+    Böylece seçimlerin Kelly ağırlığı korunur fakat
+    toplam bankroll riski %2'yi geçmez.
+    """
+
+    max_total_stake = (
+        bankroll * MAX_BANKROLL_RISK
+    )
+
+    eligible_rows = [
+        row
+        for row in rows
+        if row["eligible"]
+    ]
+
+    if not eligible_rows:
+        return rows
+
+    total_stake = sum(
+        float(row["stake"])
+        for row in eligible_rows
+    )
+
+    if total_stake <= max_total_stake:
+        return rows
+
+    if total_stake <= 0:
+        return rows
+
+    scale = (
+        max_total_stake
+        / total_stake
+    )
+
+    for row in eligible_rows:
+
+        row["stake"] = float(
+            row["stake"] * scale
+        )
+
+        row["reason"] = (
+            "ELIGIBLE: portfolio risk cap "
+            f"{MAX_BANKROLL_RISK:.2%} uygulandı"
+        )
+
+    return rows
+
+
+# =========================================================
 # SELECTION
 # =========================================================
 
@@ -181,10 +256,17 @@ def select(
         VERY_HIGH:
             NO BET
 
+        Maximum total bankroll risk:
+            2%
+
     Kelly yalnızca geçerli seçimler için hesaplanır.
 
     ÖNEMLİ:
+
         Bu fonksiyon model olasılıklarını değiştirmez.
+
+        Birden fazla seçim eligible olsa bile
+        toplam stake bankroll'un %2'sini geçemez.
     """
 
     # =====================================================
@@ -404,14 +486,6 @@ def select(
     # =====================================================
     # CRITICAL MINIMUM ODDS FILTER
     # =====================================================
-    #
-    # Q200 V3.1 test beklentisi:
-    #
-    # Eğer analiz edilen tüm oranlar 1.50 altındaysa
-    # selection motoru ValueError vermelidir.
-    #
-    # Bu davranış özellikle korunmaktadır.
-    # =====================================================
 
     if all(
         row["odds"] < MINIMUM_ODDS
@@ -423,7 +497,7 @@ def select(
         )
 
     # =====================================================
-    # SORT
+    # SORT BEFORE PORTFOLIO CAP
     # =====================================================
 
     rows.sort(
@@ -434,5 +508,40 @@ def select(
         ),
         reverse=True,
     )
+
+    # =====================================================
+    # PORTFOLIO RISK CAP
+    # =====================================================
+
+    rows = _apply_portfolio_risk_cap(
+        rows,
+        validated_bankroll,
+    )
+
+    # =====================================================
+    # FINAL RISK INTEGRITY CHECK
+    # =====================================================
+
+    total_stake = sum(
+        float(row["stake"])
+        for row in rows
+    )
+
+    maximum_total_stake = (
+        validated_bankroll
+        * MAX_BANKROLL_RISK
+    )
+
+    if total_stake > (
+        maximum_total_stake + 1e-9
+    ):
+        raise RuntimeError(
+            "KRİTİK HATA: "
+            "Toplam bankroll riski %2 sınırını aştı."
+        )
+
+    # =====================================================
+    # RETURN
+    # =====================================================
 
     return rows
