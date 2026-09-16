@@ -52,6 +52,13 @@ from .analyzer import (
     run_q200_from_files,
 )
 
+from .report import (
+    REPORT_VERSION,
+    build_report,
+    report_to_json,
+    report_to_text,
+)
+
 
 __all__ = [
     "TeamStats",
@@ -81,4 +88,9 @@ __all__ = [
     "run_pipeline_from_files",
 
     "run_q200_from_files",
+
+    "REPORT_VERSION",
+    "build_report",
+    "report_to_json",
+    "report_to_text",
 ]
