@@ -32,11 +32,13 @@ class TeamStats:
         7. away_xga
         8. away_xg
 
+    İlk 3 alan zorunludur.
+
     Legacy kullanım:
 
         TeamStats(2, 1, 1)
 
-    7 parametre:
+    7 parametreli kullanım:
 
         TeamStats(
             home_gf,
@@ -48,7 +50,7 @@ class TeamStats:
             away_xga,
         )
 
-    8 parametre:
+    8 parametreli kullanım:
 
         TeamStats(
             home_gf,
@@ -71,10 +73,16 @@ class TeamStats:
     home_xg: Optional[float] = None
     home_xga: Optional[float] = None
 
-    # Legacy 7. alan
+    # -----------------------------------------------------
+    # Legacy alan
+    # -----------------------------------------------------
+
     away_xga: Optional[float] = None
 
-    # Yeni standart away xG
+    # -----------------------------------------------------
+    # Yeni standart alan
+    # -----------------------------------------------------
+
     away_xg: Optional[float] = None
 
 
@@ -85,43 +93,74 @@ class TeamStats:
 @dataclass(frozen=True)
 class ModelSnapshot:
     """
-    LOCK edilmiş Q200 model çıktısı.
+    LOCK edilmiş model çıktısı.
 
-    Bu nesne oluşturulduktan sonra odds katmanı
-    tarafından değiştirilemez.
+    Bu nesne MODEL aşamasının sonucudur.
+
+    Odds katmanı bu nesneyi değiştiremez.
 
     İçerik:
 
-        - lambda_home
-        - lambda_away
-        - Poisson olasılıkları
-        - skor matrisi
-        - Monte Carlo olasılıkları
-        - model versiyonu
-        - LOCK durumu
+        lambda_home
+        lambda_away
+        model probabilities
+        score matrix
+        Monte Carlo probabilities
+        model version
+        lock status
     """
+
+    # -----------------------------------------------------
+    # Lambda
+    # -----------------------------------------------------
 
     lambda_home: float
     lambda_away: float
 
+    # -----------------------------------------------------
+    # Poisson model probabilities
+    # -----------------------------------------------------
+
     probabilities: Dict[str, float]
 
+    # -----------------------------------------------------
+    # Score matrix
+    # -----------------------------------------------------
+
     score_matrix: list
+
+    # -----------------------------------------------------
+    # Monte Carlo probabilities
+    # -----------------------------------------------------
 
     monte_carlo_probabilities: Dict[str, float] = field(
         default_factory=dict
     )
 
-    monte_carlo_iterations: int = 100_000
+    # -----------------------------------------------------
+    # Model configuration
+    # -----------------------------------------------------
 
     max_goals: int = 10
 
     model_version: str = "Q200-V3.1"
 
+    # -----------------------------------------------------
+    # LOCK
+    # -----------------------------------------------------
+
     locked: bool = True
+
+    # -----------------------------------------------------
+    # Compatibility property
+    # -----------------------------------------------------
 
     @property
     def model_locked(self) -> bool:
+        """
+        Modelin LOCK durumunu döndürür.
+        """
+
         return self.locked
 
 
@@ -134,10 +173,14 @@ class OddsInput:
     """
     Odds katmanı.
 
-    Model katmanından bağımsızdır.
+    Model katmanından tamamen bağımsızdır.
+
+    Odds bilgisi ModelSnapshot oluşturulurken
+    kullanılmaz.
     """
 
     market: str
+
     odds: Dict[str, float]
 
 
@@ -149,21 +192,52 @@ class OddsInput:
 class AnalysisResult:
     """
     Pipeline nihai analiz sonucu.
+
+    ModelSnapshot LOCK edilmiş model çıktısını taşır.
+
+    Odds aşamasından sonra:
+
+        Fair Odds
+        No-Vig
+        EV
+        Selections
+
+    burada tutulur.
     """
 
+    # -----------------------------------------------------
+    # LOCKED MODEL
+    # -----------------------------------------------------
+
     snapshot: ModelSnapshot
+
+    # -----------------------------------------------------
+    # FAIR ODDS
+    # -----------------------------------------------------
 
     fair_odds: Dict[str, float] = field(
         default_factory=dict
     )
 
+    # -----------------------------------------------------
+    # NO-VIG PROBABILITIES
+    # -----------------------------------------------------
+
     no_vig_probabilities: Dict[str, float] = field(
         default_factory=dict
     )
 
+    # -----------------------------------------------------
+    # EXPECTED VALUE
+    # -----------------------------------------------------
+
     ev: Dict[str, float] = field(
         default_factory=dict
     )
+
+    # -----------------------------------------------------
+    # FINAL SELECTIONS
+    # -----------------------------------------------------
 
     selections: List[dict] = field(
         default_factory=list
