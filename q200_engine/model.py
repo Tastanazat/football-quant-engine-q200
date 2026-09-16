@@ -192,18 +192,6 @@ def calculate_lambdas(
     # -----------------------------------------------------
     # AWAY xG
     # -----------------------------------------------------
-    #
-    # Yeni yapı:
-    #
-    #     away_xg
-    #
-    # Legacy 7-parametreli yapı:
-    #
-    #     away_xga
-    #
-    # Eski testlerin ve eski kullanımın bozulmaması
-    # için away_xg yoksa away_xga fallback olarak kullanılır.
-    # -----------------------------------------------------
 
     away_xg = (
         stats.away_xg
@@ -368,6 +356,55 @@ def build_model(
             "alanlarını içermelidir."
         )
 
+    for outcome in required_keys:
+
+        probability = monte_carlo[outcome]
+
+        if not isinstance(
+            probability,
+            (int, float),
+        ):
+            raise TypeError(
+                f"Monte Carlo {outcome} probability "
+                "numeric olmalıdır."
+            )
+
+        if not isfinite(
+            float(probability)
+        ):
+            raise ValueError(
+                f"Monte Carlo {outcome} probability "
+                "finite olmalıdır."
+            )
+
+        if not 0.0 <= float(probability) <= 1.0:
+            raise ValueError(
+                f"Monte Carlo {outcome} probability "
+                "0 ile 1 arasında olmalıdır."
+            )
+
+    # -----------------------------------------------------
+    # MONTE CARLO NORMALIZATION
+    # -----------------------------------------------------
+
+    monte_carlo_total = sum(
+        float(monte_carlo[outcome])
+        for outcome in required_keys
+    )
+
+    if monte_carlo_total <= 0:
+        raise ValueError(
+            "Monte Carlo probability toplamı geçersiz."
+        )
+
+    monte_carlo_probabilities = {
+        outcome: (
+            float(monte_carlo[outcome])
+            / monte_carlo_total
+        )
+        for outcome in required_keys
+    }
+
     # -----------------------------------------------------
     # STEP 5
     # MODEL LOCK
@@ -378,9 +415,26 @@ def build_model(
         lambda_away=lambda_away,
         probabilities=probabilities,
         score_matrix=score_matrix,
+        monte_carlo_probabilities=(
+            monte_carlo_probabilities
+        ),
         max_goals=max_goals,
         model_version=MODEL_VERSION,
         locked=True,
     )
+
+    # -----------------------------------------------------
+    # FINAL LOCK VALIDATION
+    # -----------------------------------------------------
+
+    if not snapshot.locked:
+        raise RuntimeError(
+            "Model LOCK başarısız."
+        )
+
+    if not snapshot.model_locked:
+        raise RuntimeError(
+            "Model LOCK doğrulanamadı."
+        )
 
     return snapshot
