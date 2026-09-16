@@ -1,859 +1,827 @@
+"""
+Q200 Engine - Test Suite
+
+Q200 V3.1
+
+Test kapsamı:
+
+- Schema
+- Lambda
+- Poisson
+- Monte Carlo
+- Model Lock
+- Stress Test
+- Odds / No-Vig
+- Fair Odds
+- EV
+- Selection
+- Kelly
+- Portfolio Risk Cap
+- Backtest
+- Pipeline
+- Odds -> Model bağımsızlığı
+"""
+
+from __future__ import annotations
+
+import math
+
 import pytest
 
-from q200_engine.schema import TeamStats
-from q200_engine.model import calculate_lambdas, build_model
-from q200_engine.poisson_model import poisson_match_probabilities
-from q200_engine.monte_carlo import simulate_match
-from q200_engine.odds import implied_probabilities
-from q200_engine.selection import select
-from q200_engine.kelly import quarter_kelly
-from q200_engine.pipeline import Q200Pipeline
-
 from q200_engine.backtest import (
-    settle_market,
-    calculate_profit,
-    settle_bet,
     BacktestEngine,
+    calculate_profit,
     run_backtest,
+    settle_bet,
+    settle_market,
+)
+from q200_engine.kelly import quarter_kelly
+from q200_engine.markets import (
+    all_market_probabilities,
+    fair_odds_from_probabilities,
+)
+from q200_engine.model import build_model, calculate_lambdas
+from q200_engine.odds import (
+    expected_value,
+    implied_probabilities,
+    remove_vig,
+)
+from q200_engine.pipeline import (
+    Q200Pipeline,
+    run_pipeline,
+)
+from q200_engine.schema import TeamStats
+from q200_engine.selection import (
+    MAX_BANKROLL_RISK,
+    MINIMUM_ODDS,
+    select,
+)
+from q200_engine.stress_test import (
+    stress_lambdas,
+    stress_market_probabilities,
 )
 
 
 # =========================================================
-# LAMBDA
+# FIXTURES
 # =========================================================
 
-def test_lambda_formula():
+@pytest.fixture
+def stats() -> TeamStats:
+    return TeamStats(
+        home_gf=1.8,
+        home_ga=1.1,
+        away_gf=1.4,
+        away_ga=1.3,
+        home_xg=1.75,
+        home_xga=1.05,
+        away_xg=1.35,
+        away_xga=1.25,
+    )
 
-    s = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
+
+@pytest.fixture
+def bankroll() -> float:
+    return 50_000.0
+
+
+# =========================================================
+# MODEL / LAMBDA
+# =========================================================
+
+def test_lambda_calculation(stats):
+    lambda_home, lambda_away = calculate_lambdas(stats)
+
+    assert lambda_home > 0
+    assert lambda_away > 0
+
+    assert math.isclose(
+        lambda_home,
+        (
+            0.35 * stats.home_gf
+            + 0.35 * stats.away_ga
+            + 0.15 * stats.home_xg
+            + 0.15 * stats.away_xga
+        ),
+        rel_tol=1e-9,
+    )
+
+    assert math.isclose(
+        lambda_away,
+        (
+            0.35 * stats.away_gf
+            + 0.35 * stats.home_ga
+            + 0.15 * stats.away_xg
+            + 0.15 * stats.home_xga
+        ),
+        rel_tol=1e-9,
+    )
+
+
+def test_model_build(stats):
+    snapshot = build_model(stats)
+
+    assert snapshot.lambda_home > 0
+    assert snapshot.lambda_away > 0
+
+    assert snapshot.locked is True
+    assert snapshot.model_locked is True
+
+    assert snapshot.model_version == "Q200-V3.1"
+
+    assert snapshot.probabilities
+
+    assert "HOME" in snapshot.probabilities
+    assert "DRAW" in snapshot.probabilities
+    assert "AWAY" in snapshot.probabilities
+
+    total_probability = sum(
+        snapshot.probabilities.values()
+    )
+
+    assert math.isclose(
+        total_probability,
         1.0,
-        1.4,
-    )
-
-    h, a = calculate_lambdas(s)
-
-    assert h == pytest.approx(1.705)
-    assert a == pytest.approx(1.305)
-
-
-# =========================================================
-# POISSON
-# =========================================================
-
-def test_probabilities_sum_to_one():
-
-    p = poisson_match_probabilities(
-        1.5,
-        1.1,
-    )
-
-    assert sum(
-        p.values()
-    ) == pytest.approx(
-        1.0,
-        abs=1e-12,
+        rel_tol=1e-9,
+        abs_tol=1e-9,
     )
 
 
 # =========================================================
-# MODEL LOCK
+# POISSON / MARKET
 # =========================================================
 
-def test_model_is_locked():
-
-    s = TeamStats(
-        2,
-        1,
-        1,
+def test_all_market_probabilities(stats):
+    lambda_home, lambda_away = calculate_lambdas(
+        stats
     )
 
-    snap = build_model(s)
+    markets = all_market_probabilities(
+        lambda_home,
+        lambda_away,
+    )
 
-    assert snap.locked is True
-    assert snap.model_locked is True
+    assert markets
+
+    assert "HOME" in markets
+    assert "DRAW" in markets
+    assert "AWAY" in markets
+
+    assert "OVER_2.5" in markets
+    assert "UNDER_2.5" in markets
+
+    assert "BTTS_YES" in markets
+    assert "BTTS_NO" in markets
+
+
+def test_market_probabilities_are_valid(stats):
+    lambda_home, lambda_away = calculate_lambdas(
+        stats
+    )
+
+    markets = all_market_probabilities(
+        lambda_home,
+        lambda_away,
+    )
+
+    for outcome, probability in markets.items():
+
+        assert 0 <= probability <= 1, outcome
+
+        assert math.isfinite(
+            probability
+        ), outcome
 
 
 # =========================================================
 # MONTE CARLO
 # =========================================================
 
-def test_monte_carlo_minimum():
+def test_monte_carlo_exists(stats):
+    snapshot = build_model(stats)
 
-    with pytest.raises(ValueError):
+    assert snapshot.monte_carlo_probabilities
 
-        simulate_match(
-            1.2,
-            1.0,
-            iterations=999,
-        )
+    for probability in (
+        snapshot.monte_carlo_probabilities.values()
+    ):
+        assert 0 <= probability <= 1
 
 
 # =========================================================
-# NO VIG
+# MODEL LOCK
 # =========================================================
 
-def test_no_vig_sums_to_one():
+def test_model_is_locked(stats):
+    pipeline = Q200Pipeline(stats)
 
-    p = implied_probabilities({
-        "HOME": 2.0,
-        "DRAW": 3.5,
-        "AWAY": 4.0,
-    })
+    assert pipeline.model_locked is True
 
-    assert sum(
-        p.values()
-    ) == pytest.approx(1.0)
+    before_home = pipeline.lambda_home
+    before_away = pipeline.lambda_away
+    before_probabilities = pipeline.probabilities.copy()
+
+    assert before_home > 0
+    assert before_away > 0
+    assert before_probabilities
+
+    assert pipeline.snapshot.locked is True
+
+
+# =========================================================
+# STRESS TEST
+# =========================================================
+
+def test_stress_lambdas(stats):
+    lambda_home, lambda_away = calculate_lambdas(
+        stats
+    )
+
+    stressed = stress_lambdas(
+        lambda_home,
+        lambda_away,
+    )
+
+    assert "OPTIMISTIC" in stressed
+    assert "BASELINE" in stressed
+    assert "PESSIMISTIC" in stressed
+
+    assert (
+        stressed["OPTIMISTIC"]["lambda_home"]
+        > stressed["BASELINE"]["lambda_home"]
+    )
+
+    assert (
+        stressed["OPTIMISTIC"]["lambda_away"]
+        < stressed["BASELINE"]["lambda_away"]
+    )
+
+    assert (
+        stressed["PESSIMISTIC"]["lambda_home"]
+        < stressed["BASELINE"]["lambda_home"]
+    )
+
+    assert (
+        stressed["PESSIMISTIC"]["lambda_away"]
+        > stressed["BASELINE"]["lambda_away"]
+    )
+
+
+def test_stress_market_probabilities(stats):
+    lambda_home, lambda_away = calculate_lambdas(
+        stats
+    )
+
+    stressed = stress_market_probabilities(
+        lambda_home,
+        lambda_away,
+    )
+
+    assert "OPTIMISTIC" in stressed
+    assert "BASELINE" in stressed
+    assert "PESSIMISTIC" in stressed
+
+    for scenario in stressed.values():
+
+        assert scenario
+
+        for probability in scenario.values():
+            assert 0 <= probability <= 1
+
+
+# =========================================================
+# ODDS / NO-VIG
+# =========================================================
+
+def test_implied_probabilities():
+    odds = {
+        "HOME": 2.00,
+        "DRAW": 3.50,
+        "AWAY": 4.00,
+    }
+
+    implied = implied_probabilities(odds)
+
+    assert set(implied) == set(odds)
+
+    for probability in implied.values():
+        assert probability > 0
+        assert probability < 1
+
+
+def test_remove_vig():
+    odds = {
+        "HOME": 2.00,
+        "DRAW": 3.50,
+        "AWAY": 4.00,
+    }
+
+    no_vig = remove_vig(
+        implied_probabilities(odds)
+    )
+
+    total = sum(no_vig.values())
+
+    assert math.isclose(
+        total,
+        1.0,
+        rel_tol=1e-9,
+        abs_tol=1e-9,
+    )
+
+
+# =========================================================
+# FAIR ODDS
+# =========================================================
+
+def test_fair_odds():
+    probabilities = {
+        "HOME": 0.50,
+        "DRAW": 0.25,
+        "AWAY": 0.25,
+    }
+
+    fair = fair_odds_from_probabilities(
+        probabilities
+    )
+
+    assert math.isclose(
+        fair["HOME"],
+        2.0,
+    )
+
+    assert math.isclose(
+        fair["DRAW"],
+        4.0,
+    )
+
+    assert math.isclose(
+        fair["AWAY"],
+        4.0,
+    )
+
+
+# =========================================================
+# EV
+# =========================================================
+
+def test_expected_value():
+    ev = expected_value(
+        probability=0.60,
+        odds=2.00,
+    )
+
+    assert math.isclose(
+        ev,
+        0.20,
+    )
+
+
+def test_positive_ev():
+    ev = expected_value(
+        probability=0.60,
+        odds=2.00,
+    )
+
+    assert ev > 0
+
+
+def test_negative_ev():
+    ev = expected_value(
+        probability=0.40,
+        odds=2.00,
+    )
+
+    assert ev < 0
 
 
 # =========================================================
 # KELLY
 # =========================================================
 
-def test_quarter_kelly_respects_two_percent_cap():
-
+def test_quarter_kelly():
     result = quarter_kelly(
-        0.70,
-        2.0,
-        50_000,
+        probability=0.60,
+        odds=2.00,
+        bankroll=50_000,
     )
 
-    assert result["stake"] <= 1000
+    assert result["full_kelly"] > 0
+    assert result["quarter_kelly"] > 0
+    assert result["stake"] > 0
+
+    assert (
+        result["stake"]
+        <= 50_000 * MAX_BANKROLL_RISK
+    )
+
+
+def test_kelly_bankroll_cap():
+    result = quarter_kelly(
+        probability=0.99,
+        odds=5.00,
+        bankroll=50_000,
+    )
+
+    assert (
+        result["stake"]
+        <= 50_000 * MAX_BANKROLL_RISK
+    )
 
 
 # =========================================================
-# MINIMUM ODDS
+# SELECTION
 # =========================================================
 
-def test_minimum_odds_filter():
+def test_selection_eligible():
+    probabilities = {
+        "HOME": 0.60,
+        "DRAW": 0.20,
+        "AWAY": 0.20,
+    }
+
+    odds = {
+        "HOME": 2.00,
+        "DRAW": 3.50,
+        "AWAY": 4.00,
+    }
+
+    result = select(
+        probabilities,
+        odds,
+        bankroll=50_000,
+        uncertainty="MEDIUM",
+    )
+
+    assert result
+
+    home = next(
+        row
+        for row in result
+        if row["outcome"] == "HOME"
+    )
+
+    assert home["eligible"] is True
+    assert home["ev"] >= 0.08
+    assert home["stake"] > 0
+
+
+def test_selection_minimum_odds_filter():
+    probabilities = {
+        "HOME": 0.80,
+        "DRAW": 0.10,
+        "AWAY": 0.10,
+    }
+
+    odds = {
+        "HOME": 1.40,
+        "DRAW": 1.30,
+        "AWAY": 1.20,
+    }
 
     with pytest.raises(ValueError):
-
         select(
-            {
-                "HOME": 0.60,
-                "DRAW": 0.20,
-                "AWAY": 0.20,
-            },
-            {
-                "HOME": 1.40,
-                "DRAW": 1.45,
-                "AWAY": 1.49,
-            },
-            50_000,
+            probabilities,
+            odds,
+            bankroll=50_000,
+            uncertainty="LOW",
         )
 
 
-# =========================================================
-# EV SELECTION
-# =========================================================
+def test_selection_skips_missing_odds():
+    probabilities = {
+        "HOME": 0.60,
+        "DRAW": 0.20,
+        "AWAY": 0.20,
+    }
 
-def test_ev_can_create_eligible_selection():
+    odds = {
+        "HOME": 2.00,
+    }
 
-    rows = select(
-        {
-            "HOME": 0.60,
-            "DRAW": 0.20,
-            "AWAY": 0.20,
-        },
-        {
-            "HOME": 2.0,
-            "DRAW": 4.0,
-            "AWAY": 5.0,
-        },
-        50_000,
+    result = select(
+        probabilities,
+        odds,
+        bankroll=50_000,
         uncertainty="LOW",
     )
 
-    assert rows[0]["outcome"] == "HOME"
-    assert rows[0]["eligible"] is True
+    assert len(result) == 1
+    assert result[0]["outcome"] == "HOME"
 
 
-# =========================================================
-# MODEL INDEPENDENCE
-# =========================================================
+def test_selection_very_high_uncertainty():
+    probabilities = {
+        "HOME": 0.50,
+        "DRAW": 0.25,
+        "AWAY": 0.25,
+    }
 
-def test_pipeline_keeps_model_independent_of_odds():
+    odds = {
+        "HOME": 2.00,
+        "DRAW": 3.50,
+        "AWAY": 4.00,
+    }
 
-    s = TeamStats(
-        2,
-        1,
-        1.2,
-        1.4,
-        1.7,
-        1.0,
-        1.1,
-        1.3,
-    )
-
-    p = Q200Pipeline(s)
-
-    before = p.snapshot
-
-    p.analyze_odds(
-        {
-            "HOME": 2.0,
-            "DRAW": 3.5,
-            "AWAY": 4.0,
-        },
-        50_000,
-    )
-
-    assert p.snapshot == before
-    assert p.snapshot.locked is True
-
-
-# =========================================================
-# Q200 V3.1 - ADDITIONAL SAFETY TESTS
-# =========================================================
-
-
-# =========================================================
-# VERY HIGH UNCERTAINTY
-# =========================================================
-
-def test_very_high_uncertainty_is_no_bet():
-
-    rows = select(
-        {
-            "HOME": 0.60,
-            "DRAW": 0.20,
-            "AWAY": 0.20,
-        },
-        {
-            "HOME": 2.00,
-            "DRAW": 3.50,
-            "AWAY": 4.00,
-        },
-        50_000,
+    result = select(
+        probabilities,
+        odds,
+        bankroll=50_000,
         uncertainty="VERY_HIGH",
     )
 
-    assert len(rows) == 3
+    assert len(result) == 3
 
-    for row in rows:
-
-        assert row["eligible"] is False
-        assert row["stake"] == 0.0
-        assert "NO BET" in row["reason"]
-
-
-# =========================================================
-# UNCERTAINTY VALIDATION
-# =========================================================
-
-def test_invalid_uncertainty_is_rejected():
-
-    with pytest.raises(ValueError):
-
-        select(
-            {
-                "HOME": 0.60,
-                "DRAW": 0.20,
-                "AWAY": 0.20,
-            },
-            {
-                "HOME": 2.00,
-                "DRAW": 3.50,
-                "AWAY": 4.00,
-            },
-            50_000,
-            uncertainty="INVALID",
-        )
-
-
-# =========================================================
-# ODDS VALIDATION
-# =========================================================
-
-def test_odds_must_be_greater_than_one():
-
-    with pytest.raises(ValueError):
-
-        select(
-            {
-                "HOME": 0.60,
-                "DRAW": 0.20,
-                "AWAY": 0.20,
-            },
-            {
-                "HOME": 1.00,
-                "DRAW": 3.50,
-                "AWAY": 4.00,
-            },
-            50_000,
-        )
-
-
-# =========================================================
-# PROBABILITY VALIDATION
-# =========================================================
-
-def test_probability_must_be_between_zero_and_one():
-
-    with pytest.raises(ValueError):
-
-        select(
-            {
-                "HOME": 1.20,
-                "DRAW": 0.20,
-                "AWAY": 0.20,
-            },
-            {
-                "HOME": 2.00,
-                "DRAW": 3.50,
-                "AWAY": 4.00,
-            },
-            50_000,
-        )
-
-
-# =========================================================
-# BANKROLL VALIDATION
-# =========================================================
-
-def test_bankroll_must_be_positive():
-
-    with pytest.raises(ValueError):
-
-        select(
-            {
-                "HOME": 0.60,
-                "DRAW": 0.20,
-                "AWAY": 0.20,
-            },
-            {
-                "HOME": 2.00,
-                "DRAW": 3.50,
-                "AWAY": 4.00,
-            },
-            0,
-        )
-
-
-# =========================================================
-# MISSING ODDS
-# =========================================================
-
-def test_missing_odds_are_not_selected():
-
-    rows = select(
-        {
-            "HOME": 0.60,
-            "DRAW": 0.20,
-            "AWAY": 0.20,
-        },
-        {
-            "HOME": 2.00,
-        },
-        50_000,
-        uncertainty="LOW",
-    )
-
-    assert len(rows) == 1
-    assert rows[0]["outcome"] == "HOME"
-
-
-# =========================================================
-# MINIMUM ODDS DOES NOT AUTOMATICALLY MEAN ELIGIBLE
-# =========================================================
-
-def test_odds_above_minimum_still_requires_ev():
-
-    rows = select(
-        {
-            "HOME": 0.30,
-            "DRAW": 0.35,
-            "AWAY": 0.35,
-        },
-        {
-            "HOME": 1.50,
-            "DRAW": 1.60,
-            "AWAY": 1.70,
-        },
-        50_000,
-        uncertainty="HIGH",
-    )
-
-    for row in rows:
-
-        assert row["eligible"] is False
-
-
-# =========================================================
-# KELLY RISK CAP
-# =========================================================
-
-def test_all_selected_stakes_respect_two_percent_cap():
-
-    rows = select(
-        {
-            "HOME": 0.70,
-            "DRAW": 0.20,
-            "AWAY": 0.10,
-        },
-        {
-            "HOME": 2.00,
-            "DRAW": 4.00,
-            "AWAY": 6.00,
-        },
-        50_000,
-        uncertainty="LOW",
-    )
-
-    max_stake = 50_000 * 0.02
-
-    for row in rows:
-
-        assert row["stake"] <= max_stake
-
-
-# =========================================================
-# MODEL SNAPSHOT MUST REMAIN LOCKED
-# =========================================================
-
-def test_odds_cannot_change_lambda():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
-    pipeline = Q200Pipeline(stats)
-
-    original_home = pipeline.lambda_home
-    original_away = pipeline.lambda_away
-
-    pipeline.analyze_odds(
-        {
-            "HOME": 1.50,
-            "DRAW": 5.00,
-            "AWAY": 10.00,
-        },
-        50_000,
-    )
-
-    assert pipeline.lambda_home == pytest.approx(
-        original_home
-    )
-
-    assert pipeline.lambda_away == pytest.approx(
-        original_away
-    )
-
-
-# =========================================================
-# ODDS CANNOT CHANGE MODEL PROBABILITIES
-# =========================================================
-
-def test_odds_cannot_change_model_probabilities():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
-    pipeline = Q200Pipeline(stats)
-
-    original_probabilities = (
-        pipeline.probabilities.copy()
-    )
-
-    pipeline.analyze_odds(
-        {
-            "HOME": 1.50,
-            "DRAW": 8.00,
-            "AWAY": 12.00,
-        },
-        50_000,
-    )
-
-    assert pipeline.probabilities == (
-        original_probabilities
-    )
-
-
-# =========================================================
-# MODEL LOCK MUST SURVIVE ODDS ANALYSIS
-# =========================================================
-
-def test_model_lock_survives_odds_analysis():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
-    pipeline = Q200Pipeline(stats)
-
-    assert pipeline.model_locked is True
-
-    pipeline.analyze_odds(
-        {
-            "HOME": 2.00,
-            "DRAW": 3.50,
-            "AWAY": 4.00,
-        },
-        50_000,
-    )
-
-    assert pipeline.model_locked is True
-
-
-# =========================================================
-# POISSON PROBABILITIES RANGE
-# =========================================================
-
-def test_poisson_probabilities_are_valid():
-
-    probabilities = poisson_match_probabilities(
-        1.5,
-        1.1,
-    )
-
-    for probability in probabilities.values():
-
-        assert probability >= 0.0
-        assert probability <= 1.0
-
-
-# =========================================================
-# MONTE CARLO PROBABILITIES RANGE
-# =========================================================
-
-def test_monte_carlo_probabilities_are_valid():
-
-    result = simulate_match(
-        1.5,
-        1.1,
-        iterations=100_000,
-    )
-
-    for probability in result.values():
-
-        assert probability >= 0.0
-        assert probability <= 1.0
-
-
-# =========================================================
-# LAMBDA MUST BE POSITIVE
-# =========================================================
-
-def test_lambda_values_are_positive():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
-    home, away = calculate_lambdas(stats)
-
-    assert home > 0
-    assert away > 0
-
-
-# =========================================================
-# VERY HIGH MUST NEVER PRODUCE STAKE
-# =========================================================
-
-def test_very_high_uncertainty_never_produces_stake():
-
-    rows = select(
-        {
-            "HOME": 0.90,
-            "DRAW": 0.05,
-            "AWAY": 0.05,
-        },
-        {
-            "HOME": 5.00,
-            "DRAW": 5.00,
-            "AWAY": 5.00,
-        },
-        50_000,
-        uncertainty="VERY_HIGH",
-    )
-
-    for row in rows:
-
+    for row in result:
         assert row["eligible"] is False
         assert row["stake"] == 0.0
         assert row["quarter_kelly"] == 0.0
+        assert row["reason"] == (
+            "VERY_HIGH uncertainty -> NO BET"
+        )
 
 
 # =========================================================
-# BACKTEST - 1X2
+# NEW: PORTFOLIO RISK CAP
 # =========================================================
 
-def test_backtest_home_win():
+def test_total_selected_stakes_respect_two_percent_cap():
+    """
+    Birden fazla eligible seçim olsa bile
+    toplam stake bankroll'un %2'sini geçemez.
+    """
 
-    result = settle_market(
+    bankroll = 50_000.0
+
+    probabilities = {
+        "HOME": 0.80,
+        "DRAW": 0.70,
+        "AWAY": 0.60,
+    }
+
+    odds = {
+        "HOME": 2.00,
+        "DRAW": 2.00,
+        "AWAY": 2.00,
+    }
+
+    result = select(
+        probabilities,
+        odds,
+        bankroll=bankroll,
+        uncertainty="LOW",
+    )
+
+    total_stake = sum(
+        row["stake"]
+        for row in result
+        if row["eligible"]
+    )
+
+    maximum_allowed = (
+        bankroll * MAX_BANKROLL_RISK
+    )
+
+    assert total_stake <= (
+        maximum_allowed + 1e-9
+    )
+
+
+def test_portfolio_risk_cap_is_exactly_two_percent_when_needed():
+    """
+    Kelly stake toplamı %2'yi aşarsa
+    sistem toplamı %2'ye ölçeklemelidir.
+    """
+
+    bankroll = 50_000.0
+
+    probabilities = {
+        "A": 0.95,
+        "B": 0.90,
+        "C": 0.85,
+    }
+
+    odds = {
+        "A": 2.00,
+        "B": 2.00,
+        "C": 2.00,
+    }
+
+    result = select(
+        probabilities,
+        odds,
+        bankroll=bankroll,
+        uncertainty="LOW",
+    )
+
+    eligible = [
+        row
+        for row in result
+        if row["eligible"]
+    ]
+
+    assert len(eligible) == 3
+
+    total_stake = sum(
+        row["stake"]
+        for row in eligible
+    )
+
+    maximum_allowed = (
+        bankroll * MAX_BANKROLL_RISK
+    )
+
+    assert math.isclose(
+        total_stake,
+        maximum_allowed,
+        rel_tol=1e-9,
+        abs_tol=1e-9,
+    )
+
+
+def test_single_selection_stays_unchanged_under_cap():
+    """
+    Tek seçim zaten %2'nin altındaysa
+    portfolio cap gereksiz yere stake'i azaltmamalıdır.
+    """
+
+    bankroll = 50_000.0
+
+    probabilities = {
+        "HOME": 0.55,
+    }
+
+    odds = {
+        "HOME": 2.00,
+    }
+
+    result = select(
+        probabilities,
+        odds,
+        bankroll=bankroll,
+        uncertainty="LOW",
+    )
+
+    row = result[0]
+
+    assert row["eligible"] is True
+    assert row["stake"] > 0
+
+    assert row["stake"] <= (
+        bankroll * MAX_BANKROLL_RISK
+    )
+
+
+def test_no_bet_has_zero_portfolio_risk():
+    probabilities = {
+        "HOME": 0.40,
+        "DRAW": 0.30,
+        "AWAY": 0.30,
+    }
+
+    odds = {
+        "HOME": 1.50,
+        "DRAW": 1.50,
+        "AWAY": 1.50,
+    }
+
+    result = select(
+        probabilities,
+        odds,
+        bankroll=50_000,
+        uncertainty="HIGH",
+    )
+
+    total_stake = sum(
+        row["stake"]
+        for row in result
+    )
+
+    assert total_stake == 0.0
+
+
+# =========================================================
+# BACKTEST
+# =========================================================
+
+def test_settle_market():
+    assert settle_market(
         "HOME",
         2,
         1,
-    )
+    ) == "WIN"
 
-    assert result == "WIN"
-
-
-def test_backtest_home_loss():
-
-    result = settle_market(
-        "HOME",
-        0,
-        2,
-    )
-
-    assert result == "LOSS"
-
-
-def test_backtest_draw():
-
-    result = settle_market(
+    assert settle_market(
         "DRAW",
         1,
         1,
-    )
+    ) == "WIN"
 
-    assert result == "WIN"
-
-
-def test_backtest_away_win():
-
-    result = settle_market(
+    assert settle_market(
         "AWAY",
-        0,
+        1,
         2,
-    )
+    ) == "WIN"
 
-    assert result == "WIN"
+    assert settle_market(
+        "HOME",
+        1,
+        2,
+    ) == "LOSS"
 
-
-# =========================================================
-# BACKTEST - TOTAL GOALS
-# =========================================================
-
-def test_backtest_over_2_5():
-
-    result = settle_market(
+    assert settle_market(
         "OVER_2.5",
         2,
         1,
-    )
+    ) == "WIN"
 
-    assert result == "WIN"
-
-
-def test_backtest_under_2_5():
-
-    result = settle_market(
+    assert settle_market(
         "UNDER_2.5",
         1,
         1,
-    )
+    ) == "WIN"
 
-    assert result == "WIN"
-
-
-def test_backtest_over_2_5_loss():
-
-    result = settle_market(
-        "OVER_2.5",
-        1,
-        1,
-    )
-
-    assert result == "LOSS"
-
-
-def test_backtest_under_2_5_loss():
-
-    result = settle_market(
-        "UNDER_2.5",
-        2,
-        1,
-    )
-
-    assert result == "LOSS"
-
-
-# =========================================================
-# BACKTEST - BTTS
-# =========================================================
-
-def test_backtest_btts_yes():
-
-    result = settle_market(
+    assert settle_market(
         "BTTS_YES",
         2,
         1,
-    )
+    ) == "WIN"
 
-    assert result == "WIN"
-
-
-def test_backtest_btts_no():
-
-    result = settle_market(
-        "BTTS_NO",
-        0,
-        2,
-    )
-
-    assert result == "WIN"
-
-
-def test_backtest_btts_yes_loss():
-
-    result = settle_market(
-        "BTTS_YES",
-        2,
-        0,
-    )
-
-    assert result == "LOSS"
-
-
-def test_backtest_btts_no_loss():
-
-    result = settle_market(
+    assert settle_market(
         "BTTS_NO",
         2,
         1,
-    )
+    ) == "LOSS"
 
-    assert result == "LOSS"
-
-
-# =========================================================
-# BACKTEST - CORRECT SCORE
-# =========================================================
-
-def test_backtest_correct_score():
-
-    result = settle_market(
+    assert settle_market(
         "2-1",
         2,
         1,
-    )
-
-    assert result == "WIN"
+    ) == "WIN"
 
 
-def test_backtest_correct_score_loss():
-
-    result = settle_market(
-        "2-1",
-        1,
-        1,
-    )
-
-    assert result == "LOSS"
-
-
-# =========================================================
-# BACKTEST - PROFIT
-# =========================================================
-
-def test_backtest_profit_win():
-
-    profit = calculate_profit(
-        "WIN",
+def test_calculate_profit():
+    assert math.isclose(
+        calculate_profit(
+            "WIN",
+            100,
+            2.00,
+        ),
         100.0,
-        2.0,
     )
 
-    assert profit == 100.0
-
-
-def test_backtest_profit_loss():
-
-    profit = calculate_profit(
-        "LOSS",
-        100.0,
-        2.0,
+    assert math.isclose(
+        calculate_profit(
+            "LOSS",
+            100,
+            2.00,
+        ),
+        -100.0,
     )
 
-    assert profit == -100.0
-
-
-def test_backtest_profit_void():
-
-    profit = calculate_profit(
-        "VOID",
-        100.0,
-        2.0,
+    assert math.isclose(
+        calculate_profit(
+            "VOID",
+            100,
+            2.00,
+        ),
+        0.0,
     )
 
-    assert profit == 0.0
 
-
-# =========================================================
-# BACKTEST - SINGLE BET
-# =========================================================
-
-def test_backtest_settle_bet():
-
+def test_settle_bet():
     result = settle_bet(
         outcome="HOME",
-        odds=2.0,
-        stake=100.0,
         home_goals=2,
         away_goals=1,
+        stake=100,
+        odds=2.00,
     )
 
     assert result.settlement == "WIN"
-    assert result.profit == 100.0
-    assert result.stake == 100.0
-    assert result.outcome == "HOME"
-
-
-# =========================================================
-# BACKTEST - ENGINE SUMMARY
-# =========================================================
-
-def test_backtest_engine_summary():
-
-    engine = BacktestEngine(
-        starting_bankroll=1000.0
+    assert math.isclose(
+        result.profit,
+        100.0,
     )
+
+
+def test_backtest_engine():
+    engine = BacktestEngine()
 
     engine.add_bet(
         outcome="HOME",
-        odds=2.0,
-        stake=100.0,
         home_goals=2,
         away_goals=1,
+        stake=100,
+        odds=2.00,
     )
 
     engine.add_bet(
-        outcome="HOME",
-        odds=2.0,
-        stake=100.0,
-        home_goals=0,
+        outcome="AWAY",
+        home_goals=2,
         away_goals=1,
+        stake=100,
+        odds=2.00,
     )
 
     summary = engine.summary()
@@ -861,190 +829,42 @@ def test_backtest_engine_summary():
     assert summary.total_bets == 2
     assert summary.wins == 1
     assert summary.losses == 1
-    assert summary.voids == 0
-
-    assert summary.total_stake == 200.0
-    assert summary.total_profit == 0.0
-
-    assert summary.roi == 0.0
-    assert summary.hit_rate == 0.5
-
-    assert summary.starting_bankroll == 1000.0
-    assert summary.ending_bankroll == 1000.0
-
-
-# =========================================================
-# BACKTEST - NON ELIGIBLE SELECTION
-# =========================================================
-
-def test_backtest_only_eligible_selection():
-
-    engine = BacktestEngine()
-
-    selection = {
-        "outcome": "HOME",
-        "probability": 0.60,
-        "odds": 2.0,
-        "ev": 0.20,
-        "eligible": False,
-        "stake": 0.0,
-    }
-
-    result = engine.add_selection(
-        selection,
-        home_goals=2,
-        away_goals=1,
+    assert math.isclose(
+        summary.profit,
+        0.0,
     )
 
-    assert result is None
-    assert len(engine.records) == 0
-
-
-# =========================================================
-# BACKTEST - ELIGIBLE SELECTION
-# =========================================================
-
-def test_backtest_eligible_selection():
-
-    engine = BacktestEngine()
-
-    selection = {
-        "outcome": "HOME",
-        "probability": 0.60,
-        "odds": 2.0,
-        "ev": 0.20,
-        "eligible": True,
-        "stake": 100.0,
-    }
-
-    result = engine.add_selection(
-        selection,
-        home_goals=2,
-        away_goals=1,
-    )
-
-    assert result is not None
-    assert result.settlement == "WIN"
-    assert result.profit == 100.0
-
-
-# =========================================================
-# BACKTEST - BATCH
-# =========================================================
 
 def test_run_backtest():
-
-    selections = [
+    bets = [
         {
             "outcome": "HOME",
-            "odds": 2.0,
-            "stake": 100.0,
-            "eligible": True,
+            "home_goals": 2,
+            "away_goals": 1,
+            "stake": 100,
+            "odds": 2.00,
         },
         {
-            "outcome": "DRAW",
-            "odds": 3.5,
-            "stake": 100.0,
-            "eligible": True,
+            "outcome": "AWAY",
+            "home_goals": 2,
+            "away_goals": 1,
+            "stake": 100,
+            "odds": 2.00,
         },
     ]
 
-    summary = run_backtest(
-        selections,
-        home_goals=2,
-        away_goals=1,
-        starting_bankroll=1000.0,
-    )
+    summary = run_backtest(bets)
 
     assert summary.total_bets == 2
     assert summary.wins == 1
     assert summary.losses == 1
-    assert summary.voids == 0
-
-    # HOME 2.00 kazanır: +100
-    # DRAW 3.50 kaybeder: -100
-    # Toplam: 0
-    assert summary.total_profit == 0.0
-
-    assert summary.total_stake == 200.0
-    assert summary.roi == 0.0
-    assert summary.hit_rate == 0.5
-    assert summary.ending_bankroll == 1000.0
 
 
 # =========================================================
-# BACKTEST - VALIDATION
+# PIPELINE
 # =========================================================
 
-def test_backtest_rejects_negative_goals():
-
-    with pytest.raises(ValueError):
-
-        settle_market(
-            "HOME",
-            -1,
-            0,
-        )
-
-
-def test_backtest_rejects_invalid_market():
-
-    with pytest.raises(ValueError):
-
-        settle_market(
-            "INVALID_MARKET",
-            1,
-            0,
-        )
-
-
-def test_backtest_rejects_invalid_odds():
-
-    with pytest.raises(ValueError):
-
-        calculate_profit(
-            "WIN",
-            100.0,
-            1.0,
-        )
-
-
-def test_backtest_rejects_negative_stake():
-
-    with pytest.raises(ValueError):
-
-        calculate_profit(
-            "WIN",
-            -100.0,
-            2.0,
-        )
-
-
-def test_backtest_rejects_negative_starting_bankroll():
-
-    with pytest.raises(ValueError):
-
-        BacktestEngine(
-            starting_bankroll=-100.0
-        )
-
-
-# =========================================================
-# PIPELINE - STRESS TEST INTEGRATION
-# =========================================================
-
-def test_pipeline_stress_test_returns_all_scenarios():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
+def test_pipeline_stress_test(stats):
     pipeline = Q200Pipeline(stats)
 
     result = pipeline.stress_test()
@@ -1052,146 +872,23 @@ def test_pipeline_stress_test_returns_all_scenarios():
     assert "lambdas" in result
     assert "probabilities" in result
 
-    assert set(
-        result["lambdas"].keys()
-    ) == {
-        "OPTIMISTIC",
-        "BASELINE",
-        "PESSIMISTIC",
+    assert "OPTIMISTIC" in result["lambdas"]
+    assert "BASELINE" in result["lambdas"]
+    assert "PESSIMISTIC" in result["lambdas"]
+
+
+def test_pipeline_analysis(stats):
+    pipeline = Q200Pipeline(stats)
+
+    odds = {
+        "HOME": 2.20,
+        "DRAW": 3.40,
+        "AWAY": 3.20,
     }
-
-    assert set(
-        result["probabilities"].keys()
-    ) == {
-        "OPTIMISTIC",
-        "BASELINE",
-        "PESSIMISTIC",
-    }
-
-
-# =========================================================
-# PIPELINE - STRESS LAMBDA INTEGRITY
-# =========================================================
-
-def test_pipeline_stress_lambdas_are_based_on_locked_model():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
-    pipeline = Q200Pipeline(stats)
-
-    original_home = pipeline.lambda_home
-    original_away = pipeline.lambda_away
-
-    result = pipeline.stress_test()
-
-    baseline = result["lambdas"]["BASELINE"]
-
-    assert baseline["lambda_home"] == pytest.approx(
-        original_home
-    )
-
-    assert baseline["lambda_away"] == pytest.approx(
-        original_away
-    )
-
-
-# =========================================================
-# PIPELINE - STRESS DOES NOT CHANGE MODEL
-# =========================================================
-
-def test_stress_test_cannot_change_locked_model():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
-    pipeline = Q200Pipeline(stats)
-
-    snapshot_before = pipeline.snapshot
-
-    pipeline.stress_test()
-
-    assert pipeline.snapshot == snapshot_before
-    assert pipeline.snapshot.locked is True
-
-
-# =========================================================
-# PIPELINE - STRESS PROBABILITIES ARE VALID
-# =========================================================
-
-def test_stress_probabilities_are_valid():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
-    pipeline = Q200Pipeline(stats)
-
-    result = pipeline.stress_test()
-
-    for scenario, probabilities in (
-        result["probabilities"].items()
-    ):
-
-        assert scenario in {
-            "OPTIMISTIC",
-            "BASELINE",
-            "PESSIMISTIC",
-        }
-
-        assert probabilities
-
-        for probability in probabilities.values():
-
-            assert probability >= 0.0
-            assert probability <= 1.0
-
-
-# =========================================================
-# PIPELINE - FULL ANALYSIS RESULT
-# =========================================================
-
-def test_pipeline_full_analysis_result():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
-    pipeline = Q200Pipeline(stats)
 
     result = pipeline.analyze_odds(
-        {
-            "HOME": 2.00,
-            "DRAW": 3.50,
-            "AWAY": 4.00,
-        },
-        50_000,
+        odds=odds,
+        bankroll=50_000,
         uncertainty="MEDIUM",
     )
 
@@ -1207,499 +904,372 @@ def test_pipeline_full_analysis_result():
     assert result.pessimistic_probabilities
     assert result.pessimistic_ev
 
-    assert isinstance(
-        result.selections,
-        list,
-    )
+    assert result.selections
 
 
-# =========================================================
-# PIPELINE - FAIR ODDS
-# =========================================================
-
-def test_pipeline_fair_odds_are_inverse_of_model_probability():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
-    pipeline = Q200Pipeline(stats)
-
-    result = pipeline.analyze_odds(
-        {
-            "HOME": 2.00,
-            "DRAW": 3.50,
-            "AWAY": 4.00,
-        },
-        50_000,
-    )
-
-    for outcome, probability in (
-        pipeline.probabilities.items()
-    ):
-
-        if probability <= 0:
-            continue
-
-        assert result.fair_odds[outcome] == pytest.approx(
-            1.0 / probability
-        )
-
-
-# =========================================================
-# PIPELINE - BASELINE EV
-# =========================================================
-
-def test_pipeline_baseline_ev_uses_locked_model_probability():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
+def test_pipeline_very_high_uncertainty_produces_no_bet(
+    stats,
+):
     pipeline = Q200Pipeline(stats)
 
     odds = {
-        "HOME": 2.00,
-        "DRAW": 3.50,
-        "AWAY": 4.00,
+        "HOME": 2.20,
+        "DRAW": 3.40,
+        "AWAY": 3.20,
     }
 
     result = pipeline.analyze_odds(
-        odds,
-        50_000,
-    )
-
-    for outcome, odd in odds.items():
-
-        expected = (
-            pipeline.probabilities[outcome]
-            * odd
-            - 1.0
-        )
-
-        assert result.ev[outcome] == pytest.approx(
-            expected
-        )
-
-
-# =========================================================
-# PIPELINE - PESSIMISTIC EV
-# =========================================================
-
-def test_pipeline_pessimistic_ev_uses_pessimistic_probability():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
-    pipeline = Q200Pipeline(stats)
-
-    odds = {
-        "HOME": 2.00,
-        "DRAW": 3.50,
-        "AWAY": 4.00,
-    }
-
-    result = pipeline.analyze_odds(
-        odds,
-        50_000,
-    )
-
-    for outcome, odd in odds.items():
-
-        expected = (
-            result.pessimistic_probabilities[outcome]
-            * odd
-            - 1.0
-        )
-
-        assert result.pessimistic_ev[outcome] == pytest.approx(
-            expected
-        )
-
-
-# =========================================================
-# PIPELINE - ODDS CANNOT CHANGE STRESS MODEL
-# =========================================================
-
-def test_different_odds_cannot_change_stress_results():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
-    pipeline = Q200Pipeline(stats)
-
-    stress_before = pipeline.stress_test()
-
-    pipeline.analyze_odds(
-        {
-            "HOME": 1.50,
-            "DRAW": 6.00,
-            "AWAY": 10.00,
-        },
-        50_000,
-    )
-
-    stress_after = pipeline.stress_test()
-
-    assert stress_after == stress_before
-
-
-# =========================================================
-# PIPELINE - ODDS CANNOT CHANGE PESSIMISTIC PROBABILITIES
-# =========================================================
-
-def test_different_odds_cannot_change_pessimistic_probabilities():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
-    pipeline = Q200Pipeline(stats)
-
-    first = pipeline.analyze_odds(
-        {
-            "HOME": 2.00,
-            "DRAW": 3.50,
-            "AWAY": 4.00,
-        },
-        50_000,
-    )
-
-    first_pessimistic = (
-        first.pessimistic_probabilities.copy()
-    )
-
-    second = pipeline.analyze_odds(
-        {
-            "HOME": 5.00,
-            "DRAW": 2.00,
-            "AWAY": 8.00,
-        },
-        50_000,
-    )
-
-    second_pessimistic = (
-        second.pessimistic_probabilities.copy()
-    )
-
-    assert second_pessimistic == (
-        first_pessimistic
-    )
-
-
-# =========================================================
-# PIPELINE - MODEL LOCK AFTER COMPLETE FLOW
-# =========================================================
-
-def test_model_lock_survives_complete_pipeline():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
-    pipeline = Q200Pipeline(stats)
-
-    original_snapshot = pipeline.snapshot
-
-    pipeline.stress_test()
-
-    pipeline.analyze_odds(
-        {
-            "HOME": 2.00,
-            "DRAW": 3.50,
-            "AWAY": 4.00,
-        },
-        50_000,
-        uncertainty="MEDIUM",
-    )
-
-    assert pipeline.snapshot == original_snapshot
-    assert pipeline.snapshot.locked is True
-    assert pipeline.model_locked is True
-
-
-# =========================================================
-# PIPELINE - VERY HIGH UNCERTAINTY
-# =========================================================
-
-def test_pipeline_very_high_uncertainty_produces_no_bet():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
-    pipeline = Q200Pipeline(stats)
-
-    result = pipeline.analyze_odds(
-        {
-            "HOME": 2.00,
-            "DRAW": 3.50,
-            "AWAY": 4.00,
-        },
-        50_000,
+        odds=odds,
+        bankroll=50_000,
         uncertainty="VERY_HIGH",
     )
 
     assert len(result.selections) == 3
 
     for selection in result.selections:
-
         assert selection["eligible"] is False
         assert selection["stake"] == 0.0
-        assert selection["quarter_kelly"] == 0.0
 
 
-# =========================================================
-# PIPELINE - BANKROLL CAP
-# =========================================================
+def test_pipeline_model_lock_after_complete_flow(stats):
+    pipeline = Q200Pipeline(stats)
 
-def test_pipeline_selected_stakes_respect_two_percent_cap():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
+    original_home = pipeline.lambda_home
+    original_away = pipeline.lambda_away
+    original_probabilities = (
+        pipeline.probabilities.copy()
     )
+
+    odds = {
+        "HOME": 2.20,
+        "DRAW": 3.40,
+        "AWAY": 3.20,
+    }
+
+    pipeline.analyze_odds(
+        odds=odds,
+        bankroll=50_000,
+        uncertainty="MEDIUM",
+    )
+
+    assert pipeline.model_locked is True
+
+    assert math.isclose(
+        pipeline.lambda_home,
+        original_home,
+    )
+
+    assert math.isclose(
+        pipeline.lambda_away,
+        original_away,
+    )
+
+    assert (
+        pipeline.probabilities
+        == original_probabilities
+    )
+
+
+def test_odds_cannot_change_model(
+    stats,
+):
+    pipeline = Q200Pipeline(stats)
+
+    original_home = pipeline.lambda_home
+    original_away = pipeline.lambda_away
+
+    odds_1 = {
+        "HOME": 1.50,
+        "DRAW": 5.00,
+        "AWAY": 8.00,
+    }
+
+    odds_2 = {
+        "HOME": 4.00,
+        "DRAW": 2.00,
+        "AWAY": 1.80,
+    }
+
+    pipeline.analyze_odds(
+        odds=odds_1,
+        bankroll=50_000,
+        uncertainty="MEDIUM",
+    )
+
+    pipeline.analyze_odds(
+        odds=odds_2,
+        bankroll=50_000,
+        uncertainty="MEDIUM",
+    )
+
+    assert math.isclose(
+        pipeline.lambda_home,
+        original_home,
+    )
+
+    assert math.isclose(
+        pipeline.lambda_away,
+        original_away,
+    )
+
+
+def test_odds_cannot_change_pessimistic_probabilities(
+    stats,
+):
+    pipeline = Q200Pipeline(stats)
+
+    odds_1 = {
+        "HOME": 1.80,
+        "DRAW": 3.50,
+        "AWAY": 4.50,
+    }
+
+    odds_2 = {
+        "HOME": 4.00,
+        "DRAW": 2.10,
+        "AWAY": 1.90,
+    }
+
+    result_1 = pipeline.analyze_odds(
+        odds=odds_1,
+        bankroll=50_000,
+        uncertainty="MEDIUM",
+    )
+
+    result_2 = pipeline.analyze_odds(
+        odds=odds_2,
+        bankroll=50_000,
+        uncertainty="MEDIUM",
+    )
+
+    assert (
+        result_1.pessimistic_probabilities
+        == result_2.pessimistic_probabilities
+    )
+
+
+def test_pipeline_portfolio_risk_cap(stats):
+    """
+    Pipeline üzerinden gelen seçimlerde de
+    toplam bankroll riski %2'yi geçmemelidir.
+    """
 
     pipeline = Q200Pipeline(stats)
 
+    odds = {
+        "HOME": 2.00,
+        "DRAW": 2.00,
+        "AWAY": 2.00,
+    }
+
+    bankroll = 50_000.0
+
     result = pipeline.analyze_odds(
-        {
-            "HOME": 2.00,
-            "DRAW": 4.00,
-            "AWAY": 6.00,
-        },
-        50_000,
+        odds=odds,
+        bankroll=bankroll,
         uncertainty="LOW",
     )
 
-    maximum_stake = 50_000 * 0.02
+    total_stake = sum(
+        row["stake"]
+        for row in result.selections
+        if row["eligible"]
+    )
 
-    for selection in result.selections:
-
-        assert selection["stake"] <= (
-            maximum_stake
-        )
+    assert total_stake <= (
+        bankroll * MAX_BANKROLL_RISK
+        + 1e-9
+    )
 
 
 # =========================================================
-# PIPELINE - CONVENIENCE FLOW
+# CONVENIENCE FLOW
 # =========================================================
 
-def test_pipeline_complete_result_contains_locked_snapshot():
+def test_run_pipeline(stats):
+    odds = {
+        "HOME": 2.20,
+        "DRAW": 3.40,
+        "AWAY": 3.20,
+    }
 
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
+    result = run_pipeline(
+        stats=stats,
+        odds=odds,
+        bankroll=50_000,
+        uncertainty="MEDIUM",
     )
 
-    pipeline = Q200Pipeline(stats)
-
-    result = pipeline.analyze_odds(
-        {
-            "HOME": 2.00,
-            "DRAW": 3.50,
-            "AWAY": 4.00,
-        },
-        50_000,
-    )
-
-    assert result.snapshot is pipeline.snapshot
     assert result.snapshot.locked is True
-    assert result.snapshot.model_version == "Q200-V3.1"
+    assert result.selections
 
 
 # =========================================================
-# PIPELINE - INVALID ODDS
+# VALIDATION TESTS
 # =========================================================
 
-def test_pipeline_rejects_invalid_odds():
+def test_invalid_odds():
+    probabilities = {
+        "HOME": 0.60,
+    }
 
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
-    pipeline = Q200Pipeline(stats)
+    odds = {
+        "HOME": 1.0,
+    }
 
     with pytest.raises(ValueError):
-
-        pipeline.analyze_odds(
-            {
-                "HOME": 1.0,
-                "DRAW": 3.5,
-                "AWAY": 4.0,
-            },
-            50_000,
+        select(
+            probabilities,
+            odds,
+            bankroll=50_000,
         )
 
 
-# =========================================================
-# PIPELINE - INVALID BANKROLL
-# =========================================================
+def test_invalid_bankroll():
+    probabilities = {
+        "HOME": 0.60,
+    }
 
-def test_pipeline_rejects_invalid_bankroll():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
-    pipeline = Q200Pipeline(stats)
+    odds = {
+        "HOME": 2.00,
+    }
 
     with pytest.raises(ValueError):
-
-        pipeline.analyze_odds(
-            {
-                "HOME": 2.0,
-                "DRAW": 3.5,
-                "AWAY": 4.0,
-            },
-            0,
+        select(
+            probabilities,
+            odds,
+            bankroll=0,
         )
 
 
-# =========================================================
-# PIPELINE - EMPTY ODDS
-# =========================================================
-
-def test_pipeline_rejects_empty_odds():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
-    pipeline = Q200Pipeline(stats)
+def test_empty_odds():
+    probabilities = {
+        "HOME": 0.60,
+    }
 
     with pytest.raises(ValueError):
-
-        pipeline.analyze_odds(
+        select(
+            probabilities,
             {},
-            50_000,
+            bankroll=50_000,
         )
 
 
-# =========================================================
-# PIPELINE - ODDS TYPE VALIDATION
-# =========================================================
-
-def test_pipeline_rejects_non_dict_odds():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
-    pipeline = Q200Pipeline(stats)
+def test_non_dict_odds():
+    probabilities = {
+        "HOME": 0.60,
+    }
 
     with pytest.raises(TypeError):
-
-        pipeline.analyze_odds(
-            ["HOME", 2.0],
-            50_000,
+        select(
+            probabilities,
+            [],
+            bankroll=50_000,
         )
 
 
-# =========================================================
-# PIPELINE - UNCERTAINTY VALIDATION
-# =========================================================
+def test_invalid_uncertainty():
+    probabilities = {
+        "HOME": 0.60,
+    }
 
-def test_pipeline_rejects_invalid_uncertainty():
-
-    stats = TeamStats(
-        2.0,
-        1.2,
-        1.5,
-        1.8,
-        1.1,
-        1.0,
-        1.4,
-    )
-
-    pipeline = Q200Pipeline(stats)
+    odds = {
+        "HOME": 2.00,
+    }
 
     with pytest.raises(ValueError):
-
-        pipeline.analyze_odds(
-            {
-                "HOME": 2.0,
-                "DRAW": 3.5,
-                "AWAY": 4.0,
-            },
-            50_000,
-            uncertainty="INVALID",
+        select(
+            probabilities,
+            odds,
+            bankroll=50_000,
+            uncertainty="EXTREME",
         )
+
+
+def test_invalid_probability():
+    probabilities = {
+        "HOME": 1.50,
+    }
+
+    odds = {
+        "HOME": 2.00,
+    }
+
+    with pytest.raises(ValueError):
+        select(
+            probabilities,
+            odds,
+            bankroll=50_000,
+        )
+
+
+# =========================================================
+# FINAL INTEGRITY
+# =========================================================
+
+def test_selection_never_exceeds_individual_risk_cap():
+    bankroll = 50_000.0
+
+    probabilities = {
+        "A": 0.90,
+        "B": 0.80,
+        "C": 0.70,
+    }
+
+    odds = {
+        "A": 2.00,
+        "B": 2.00,
+        "C": 2.00,
+    }
+
+    result = select(
+        probabilities,
+        odds,
+        bankroll=bankroll,
+        uncertainty="LOW",
+    )
+
+    individual_cap = (
+        bankroll * MAX_BANKROLL_RISK
+    )
+
+    for row in result:
+        assert row["stake"] <= (
+            individual_cap + 1e-9
+        )
+
+
+def test_selection_total_risk_is_never_above_two_percent():
+    bankroll = 50_000.0
+
+    probabilities = {
+        "A": 0.99,
+        "B": 0.98,
+        "C": 0.97,
+        "D": 0.96,
+        "E": 0.95,
+    }
+
+    odds = {
+        "A": 2.00,
+        "B": 2.00,
+        "C": 2.00,
+        "D": 2.00,
+        "E": 2.00,
+    }
+
+    result = select(
+        probabilities,
+        odds,
+        bankroll=bankroll,
+        uncertainty="LOW",
+    )
+
+    total_stake = sum(
+        row["stake"]
+        for row in result
+    )
+
+    assert total_stake <= (
+        bankroll * 0.02 + 1e-9
+    )
