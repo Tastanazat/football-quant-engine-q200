@@ -32,12 +32,12 @@ class TeamStats:
         7. away_xga
         8. away_xg
 
-    İlk 3 alan zorunludur.
-
     Legacy kullanım:
+
         TeamStats(2, 1, 1)
 
     7 parametre:
+
         TeamStats(
             home_gf,
             home_ga,
@@ -49,6 +49,7 @@ class TeamStats:
         )
 
     8 parametre:
+
         TeamStats(
             home_gf,
             home_ga,
@@ -73,7 +74,7 @@ class TeamStats:
     # Legacy 7. alan
     away_xga: Optional[float] = None
 
-    # Yeni 8. alan
+    # Yeni standart away xG
     away_xg: Optional[float] = None
 
 
@@ -84,9 +85,20 @@ class TeamStats:
 @dataclass(frozen=True)
 class ModelSnapshot:
     """
-    LOCK edilmiş model çıktısı.
+    LOCK edilmiş Q200 model çıktısı.
 
-    Odds katmanı bu nesneyi değiştiremez.
+    Bu nesne oluşturulduktan sonra odds katmanı
+    tarafından değiştirilemez.
+
+    İçerik:
+
+        - lambda_home
+        - lambda_away
+        - Poisson olasılıkları
+        - skor matrisi
+        - Monte Carlo olasılıkları
+        - model versiyonu
+        - LOCK durumu
     """
 
     lambda_home: float
@@ -95,6 +107,12 @@ class ModelSnapshot:
     probabilities: Dict[str, float]
 
     score_matrix: list
+
+    monte_carlo_probabilities: Dict[str, float] = field(
+        default_factory=dict
+    )
+
+    monte_carlo_iterations: int = 100_000
 
     max_goals: int = 10
 
