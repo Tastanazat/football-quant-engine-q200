@@ -10,7 +10,8 @@ Bu katman:
 - Odds hesabı yapmaz.
 - Selection değiştirmez.
 - Kayıtlı analiz verisini değiştirmez.
-- Maç sonucu sonradan geldiğinde sonucu History kaydına ekler.
+- Maç sonucunu kaydeder.
+- Settlement sonucunu kalıcı olarak saklar.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from typing import Any
 from .report import build_report
 
 
-HISTORY_SCHEMA_VERSION = "Q200-HISTORY-V2"
+HISTORY_SCHEMA_VERSION = "Q200-HISTORY-V3"
 
 
 def _validate_text(
@@ -146,7 +147,10 @@ class AnalysisHistory:
                     result_recorded INTEGER NOT NULL DEFAULT 0,
                     home_goals INTEGER,
                     away_goals INTEGER,
-                    result_recorded_at TEXT
+                    result_recorded_at TEXT,
+                    settlement_recorded INTEGER NOT NULL DEFAULT 0,
+                    settlement_json TEXT,
+                    settlement_recorded_at TEXT
                 )
                 """
             )
@@ -172,6 +176,24 @@ class AnalysisHistory:
             self._ensure_column(
                 connection,
                 "result_recorded_at",
+                "TEXT",
+            )
+
+            self._ensure_column(
+                connection,
+                "settlement_recorded",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+
+            self._ensure_column(
+                connection,
+                "settlement_json",
+                "TEXT",
+            )
+
+            self._ensure_column(
+                connection,
+                "settlement_recorded_at",
                 "TEXT",
             )
 
@@ -247,9 +269,16 @@ class AnalysisHistory:
                     result_recorded,
                     home_goals,
                     away_goals,
-                    result_recorded_at
+                    result_recorded_at,
+                    settlement_recorded,
+                    settlement_json,
+                    settlement_recorded_at
                 )
-                VALUES (?, ?, ?, ?, ?, 0, NULL, NULL, NULL)
+                VALUES (
+                    ?, ?, ?, ?, ?, 0,
+                    NULL, NULL, NULL,
+                    0, NULL, NULL
+                )
                 """,
                 (
                     match_id,
@@ -275,13 +304,8 @@ class AnalysisHistory:
         """
         Kayıtlı analize maç sonucunu ekler.
 
-        Örnek:
-
-            HOME 2
-            AWAY 1
-
-        Sonuç daha önce kaydedilmişse mevcut sonuç
-        yeni sonuçla güncellenir.
+        Yeni sonuç kaydedildiğinde daha önce hesaplanmış
+        settlement otomatik olarak geçersiz hale getirilir.
         """
 
         if not isinstance(
@@ -318,7 +342,10 @@ class AnalysisHistory:
                     result_recorded = 1,
                     home_goals = ?,
                     away_goals = ?,
-                    result_recorded_at = ?
+                    result_recorded_at = ?,
+                    settlement_recorded = 0,
+                    settlement_json = NULL,
+                    settlement_recorded_at = NULL
                 WHERE id = ?
                 """,
                 (
@@ -334,6 +361,187 @@ class AnalysisHistory:
             return (
                 cursor.rowcount == 1
             )
+
+    def record_settlement(
+        self,
+        record_id: int,
+        settlement: dict[str, Any],
+    ) -> bool:
+        """
+        Hesaplanmış settlement sonucunu History kaydına
+        kalıcı olarak yazar.
+
+        Settlement yalnızca maç sonucu zaten kaydedilmişse
+        yazılabilir.
+        """
+
+        if not isinstance(
+            record_id,
+            int,
+        ):
+            raise TypeError(
+                "record_id integer olmalıdır."
+            )
+
+        if record_id <= 0:
+            raise ValueError(
+                "record_id pozitif olmalıdır."
+            )
+
+        if not isinstance(
+            settlement,
+            dict,
+        ):
+            raise TypeError(
+                "settlement dictionary olmalıdır."
+            )
+
+        required = (
+            "record_id",
+            "match_id",
+            "home_goals",
+            "away_goals",
+            "selections",
+            "summary",
+        )
+
+        missing = [
+            field
+            for field in required
+            if field not in settlement
+        ]
+
+        if missing:
+            raise ValueError(
+                "Settlement eksik alan içeriyor: "
+                + ", ".join(missing)
+            )
+
+        if settlement["record_id"] != record_id:
+            raise ValueError(
+                "Settlement record_id ile History record_id eşleşmiyor."
+            )
+
+        home_goals = _validate_goals(
+            settlement["home_goals"],
+            "home_goals",
+        )
+
+        away_goals = _validate_goals(
+            settlement["away_goals"],
+            "away_goals",
+        )
+
+        settlement_json = json.dumps(
+            settlement,
+            ensure_ascii=False,
+            sort_keys=False,
+        )
+
+        recorded_at = _utc_now()
+
+        with self._connect() as connection:
+
+            row = connection.execute(
+                """
+                SELECT
+                    result_recorded,
+                    home_goals,
+                    away_goals
+                FROM analysis_history
+                WHERE id = ?
+                """,
+                (
+                    record_id,
+                ),
+            ).fetchone()
+
+            if row is None:
+                return False
+
+            if not bool(
+                row["result_recorded"]
+            ):
+                raise ValueError(
+                    "Settlement için önce maç sonucu kaydedilmelidir."
+                )
+
+            if (
+                row["home_goals"]
+                != home_goals
+                or row["away_goals"]
+                != away_goals
+            ):
+                raise ValueError(
+                    "Settlement skoru History'deki maç sonucu ile eşleşmiyor."
+                )
+
+            cursor = connection.execute(
+                """
+                UPDATE analysis_history
+                SET
+                    settlement_recorded = 1,
+                    settlement_json = ?,
+                    settlement_recorded_at = ?
+                WHERE id = ?
+                """,
+                (
+                    settlement_json,
+                    recorded_at,
+                    record_id,
+                ),
+            )
+
+            connection.commit()
+
+            return (
+                cursor.rowcount == 1
+            )
+
+    def settle_record(
+        self,
+        record_id: int,
+    ) -> dict[str, Any]:
+        """
+        History kaydındaki kayıtlı maç sonucu ile
+        settlement hesaplar ve sonucu SQLite'a
+        kalıcı olarak kaydeder.
+        """
+
+        record = self.get(
+            record_id
+        )
+
+        if record is None:
+            raise ValueError(
+                f"History kaydı bulunamadı: {record_id}"
+            )
+
+        if not record[
+            "result_recorded"
+        ]:
+            raise ValueError(
+                "Settlement için önce maç sonucu kaydedilmelidir."
+            )
+
+        from .settlement import (
+            settle_analysis_record,
+        )
+
+        settlement = (
+            settle_analysis_record(
+                record,
+                record["home_goals"],
+                record["away_goals"],
+            )
+        )
+
+        self.record_settlement(
+            record_id,
+            settlement,
+        )
+
+        return settlement
 
     def get(
         self,
@@ -370,7 +578,10 @@ class AnalysisHistory:
                     result_recorded,
                     home_goals,
                     away_goals,
-                    result_recorded_at
+                    result_recorded_at,
+                    settlement_recorded,
+                    settlement_json,
+                    settlement_recorded_at
                 FROM analysis_history
                 WHERE id = ?
                 """,
@@ -402,6 +613,19 @@ class AnalysisHistory:
             ],
             "result_recorded_at": row[
                 "result_recorded_at"
+            ],
+            "settlement_recorded": bool(
+                row["settlement_recorded"]
+            ),
+            "settlement": (
+                json.loads(
+                    row["settlement_json"]
+                )
+                if row["settlement_json"]
+                else None
+            ),
+            "settlement_recorded_at": row[
+                "settlement_recorded_at"
             ],
         }
 
@@ -439,7 +663,9 @@ class AnalysisHistory:
                     result_recorded,
                     home_goals,
                     away_goals,
-                    result_recorded_at
+                    result_recorded_at,
+                    settlement_recorded,
+                    settlement_recorded_at
                 FROM analysis_history
                 ORDER BY id DESC
                 LIMIT ?
@@ -471,6 +697,12 @@ class AnalysisHistory:
                 ],
                 "result_recorded_at": row[
                     "result_recorded_at"
+                ],
+                "settlement_recorded": bool(
+                    row["settlement_recorded"]
+                ),
+                "settlement_recorded_at": row[
+                    "settlement_recorded_at"
                 ],
             }
             for row in rows
