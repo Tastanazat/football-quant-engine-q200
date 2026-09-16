@@ -1027,3 +1027,679 @@ def test_backtest_rejects_negative_starting_bankroll():
         BacktestEngine(
             starting_bankroll=-100.0
         )
+
+
+# =========================================================
+# PIPELINE - STRESS TEST INTEGRATION
+# =========================================================
+
+def test_pipeline_stress_test_returns_all_scenarios():
+
+    stats = TeamStats(
+        2.0,
+        1.2,
+        1.5,
+        1.8,
+        1.1,
+        1.0,
+        1.4,
+    )
+
+    pipeline = Q200Pipeline(stats)
+
+    result = pipeline.stress_test()
+
+    assert "lambdas" in result
+    assert "probabilities" in result
+
+    assert set(
+        result["lambdas"].keys()
+    ) == {
+        "OPTIMISTIC",
+        "BASELINE",
+        "PESSIMISTIC",
+    }
+
+    assert set(
+        result["probabilities"].keys()
+    ) == {
+        "OPTIMISTIC",
+        "BASELINE",
+        "PESSIMISTIC",
+    }
+
+
+# =========================================================
+# PIPELINE - STRESS LAMBDA INTEGRITY
+# =========================================================
+
+def test_pipeline_stress_lambdas_are_based_on_locked_model():
+
+    stats = TeamStats(
+        2.0,
+        1.2,
+        1.5,
+        1.8,
+        1.1,
+        1.0,
+        1.4,
+    )
+
+    pipeline = Q200Pipeline(stats)
+
+    original_home = pipeline.lambda_home
+    original_away = pipeline.lambda_away
+
+    result = pipeline.stress_test()
+
+    baseline = result["lambdas"]["BASELINE"]
+
+    assert baseline["lambda_home"] == pytest.approx(
+        original_home
+    )
+
+    assert baseline["lambda_away"] == pytest.approx(
+        original_away
+    )
+
+
+# =========================================================
+# PIPELINE - STRESS DOES NOT CHANGE MODEL
+# =========================================================
+
+def test_stress_test_cannot_change_locked_model():
+
+    stats = TeamStats(
+        2.0,
+        1.2,
+        1.5,
+        1.8,
+        1.1,
+        1.0,
+        1.4,
+    )
+
+    pipeline = Q200Pipeline(stats)
+
+    snapshot_before = pipeline.snapshot
+
+    pipeline.stress_test()
+
+    assert pipeline.snapshot == snapshot_before
+    assert pipeline.snapshot.locked is True
+
+
+# =========================================================
+# PIPELINE - STRESS PROBABILITIES ARE VALID
+# =========================================================
+
+def test_stress_probabilities_are_valid():
+
+    stats = TeamStats(
+        2.0,
+        1.2,
+        1.5,
+        1.8,
+        1.1,
+        1.0,
+        1.4,
+    )
+
+    pipeline = Q200Pipeline(stats)
+
+    result = pipeline.stress_test()
+
+    for scenario, probabilities in (
+        result["probabilities"].items()
+    ):
+
+        assert scenario in {
+            "OPTIMISTIC",
+            "BASELINE",
+            "PESSIMISTIC",
+        }
+
+        assert probabilities
+
+        for probability in probabilities.values():
+
+            assert probability >= 0.0
+            assert probability <= 1.0
+
+
+# =========================================================
+# PIPELINE - FULL ANALYSIS RESULT
+# =========================================================
+
+def test_pipeline_full_analysis_result():
+
+    stats = TeamStats(
+        2.0,
+        1.2,
+        1.5,
+        1.8,
+        1.1,
+        1.0,
+        1.4,
+    )
+
+    pipeline = Q200Pipeline(stats)
+
+    result = pipeline.analyze_odds(
+        {
+            "HOME": 2.00,
+            "DRAW": 3.50,
+            "AWAY": 4.00,
+        },
+        50_000,
+        uncertainty="MEDIUM",
+    )
+
+    assert result.snapshot.locked is True
+
+    assert result.fair_odds
+    assert result.no_vig_probabilities
+    assert result.ev
+
+    assert result.stress_lambdas
+    assert result.stress_probabilities
+
+    assert result.pessimistic_probabilities
+    assert result.pessimistic_ev
+
+    assert isinstance(
+        result.selections,
+        list,
+    )
+
+
+# =========================================================
+# PIPELINE - FAIR ODDS
+# =========================================================
+
+def test_pipeline_fair_odds_are_inverse_of_model_probability():
+
+    stats = TeamStats(
+        2.0,
+        1.2,
+        1.5,
+        1.8,
+        1.1,
+        1.0,
+        1.4,
+    )
+
+    pipeline = Q200Pipeline(stats)
+
+    result = pipeline.analyze_odds(
+        {
+            "HOME": 2.00,
+            "DRAW": 3.50,
+            "AWAY": 4.00,
+        },
+        50_000,
+    )
+
+    for outcome, probability in (
+        pipeline.probabilities.items()
+    ):
+
+        if probability <= 0:
+            continue
+
+        assert result.fair_odds[outcome] == pytest.approx(
+            1.0 / probability
+        )
+
+
+# =========================================================
+# PIPELINE - BASELINE EV
+# =========================================================
+
+def test_pipeline_baseline_ev_uses_locked_model_probability():
+
+    stats = TeamStats(
+        2.0,
+        1.2,
+        1.5,
+        1.8,
+        1.1,
+        1.0,
+        1.4,
+    )
+
+    pipeline = Q200Pipeline(stats)
+
+    odds = {
+        "HOME": 2.00,
+        "DRAW": 3.50,
+        "AWAY": 4.00,
+    }
+
+    result = pipeline.analyze_odds(
+        odds,
+        50_000,
+    )
+
+    for outcome, odd in odds.items():
+
+        expected = (
+            pipeline.probabilities[outcome]
+            * odd
+            - 1.0
+        )
+
+        assert result.ev[outcome] == pytest.approx(
+            expected
+        )
+
+
+# =========================================================
+# PIPELINE - PESSIMISTIC EV
+# =========================================================
+
+def test_pipeline_pessimistic_ev_uses_pessimistic_probability():
+
+    stats = TeamStats(
+        2.0,
+        1.2,
+        1.5,
+        1.8,
+        1.1,
+        1.0,
+        1.4,
+    )
+
+    pipeline = Q200Pipeline(stats)
+
+    odds = {
+        "HOME": 2.00,
+        "DRAW": 3.50,
+        "AWAY": 4.00,
+    }
+
+    result = pipeline.analyze_odds(
+        odds,
+        50_000,
+    )
+
+    for outcome, odd in odds.items():
+
+        expected = (
+            result.pessimistic_probabilities[outcome]
+            * odd
+            - 1.0
+        )
+
+        assert result.pessimistic_ev[outcome] == pytest.approx(
+            expected
+        )
+
+
+# =========================================================
+# PIPELINE - ODDS CANNOT CHANGE STRESS MODEL
+# =========================================================
+
+def test_different_odds_cannot_change_stress_results():
+
+    stats = TeamStats(
+        2.0,
+        1.2,
+        1.5,
+        1.8,
+        1.1,
+        1.0,
+        1.4,
+    )
+
+    pipeline = Q200Pipeline(stats)
+
+    stress_before = pipeline.stress_test()
+
+    pipeline.analyze_odds(
+        {
+            "HOME": 1.50,
+            "DRAW": 6.00,
+            "AWAY": 10.00,
+        },
+        50_000,
+    )
+
+    stress_after = pipeline.stress_test()
+
+    assert stress_after == stress_before
+
+
+# =========================================================
+# PIPELINE - ODDS CANNOT CHANGE PESSIMISTIC PROBABILITIES
+# =========================================================
+
+def test_different_odds_cannot_change_pessimistic_probabilities():
+
+    stats = TeamStats(
+        2.0,
+        1.2,
+        1.5,
+        1.8,
+        1.1,
+        1.0,
+        1.4,
+    )
+
+    pipeline = Q200Pipeline(stats)
+
+    first = pipeline.analyze_odds(
+        {
+            "HOME": 2.00,
+            "DRAW": 3.50,
+            "AWAY": 4.00,
+        },
+        50_000,
+    )
+
+    first_pessimistic = (
+        first.pessimistic_probabilities.copy()
+    )
+
+    second = pipeline.analyze_odds(
+        {
+            "HOME": 5.00,
+            "DRAW": 2.00,
+            "AWAY": 8.00,
+        },
+        50_000,
+    )
+
+    second_pessimistic = (
+        second.pessimistic_probabilities.copy()
+    )
+
+    assert second_pessimistic == (
+        first_pessimistic
+    )
+
+
+# =========================================================
+# PIPELINE - MODEL LOCK AFTER COMPLETE FLOW
+# =========================================================
+
+def test_model_lock_survives_complete_pipeline():
+
+    stats = TeamStats(
+        2.0,
+        1.2,
+        1.5,
+        1.8,
+        1.1,
+        1.0,
+        1.4,
+    )
+
+    pipeline = Q200Pipeline(stats)
+
+    original_snapshot = pipeline.snapshot
+
+    pipeline.stress_test()
+
+    pipeline.analyze_odds(
+        {
+            "HOME": 2.00,
+            "DRAW": 3.50,
+            "AWAY": 4.00,
+        },
+        50_000,
+        uncertainty="MEDIUM",
+    )
+
+    assert pipeline.snapshot == original_snapshot
+    assert pipeline.snapshot.locked is True
+    assert pipeline.model_locked is True
+
+
+# =========================================================
+# PIPELINE - VERY HIGH UNCERTAINTY
+# =========================================================
+
+def test_pipeline_very_high_uncertainty_produces_no_bet():
+
+    stats = TeamStats(
+        2.0,
+        1.2,
+        1.5,
+        1.8,
+        1.1,
+        1.0,
+        1.4,
+    )
+
+    pipeline = Q200Pipeline(stats)
+
+    result = pipeline.analyze_odds(
+        {
+            "HOME": 2.00,
+            "DRAW": 3.50,
+            "AWAY": 4.00,
+        },
+        50_000,
+        uncertainty="VERY_HIGH",
+    )
+
+    assert len(result.selections) == 3
+
+    for selection in result.selections:
+
+        assert selection["eligible"] is False
+        assert selection["stake"] == 0.0
+        assert selection["quarter_kelly"] == 0.0
+
+
+# =========================================================
+# PIPELINE - BANKROLL CAP
+# =========================================================
+
+def test_pipeline_selected_stakes_respect_two_percent_cap():
+
+    stats = TeamStats(
+        2.0,
+        1.2,
+        1.5,
+        1.8,
+        1.1,
+        1.0,
+        1.4,
+    )
+
+    pipeline = Q200Pipeline(stats)
+
+    result = pipeline.analyze_odds(
+        {
+            "HOME": 2.00,
+            "DRAW": 4.00,
+            "AWAY": 6.00,
+        },
+        50_000,
+        uncertainty="LOW",
+    )
+
+    maximum_stake = 50_000 * 0.02
+
+    for selection in result.selections:
+
+        assert selection["stake"] <= (
+            maximum_stake
+        )
+
+
+# =========================================================
+# PIPELINE - CONVENIENCE FLOW
+# =========================================================
+
+def test_pipeline_complete_result_contains_locked_snapshot():
+
+    stats = TeamStats(
+        2.0,
+        1.2,
+        1.5,
+        1.8,
+        1.1,
+        1.0,
+        1.4,
+    )
+
+    pipeline = Q200Pipeline(stats)
+
+    result = pipeline.analyze_odds(
+        {
+            "HOME": 2.00,
+            "DRAW": 3.50,
+            "AWAY": 4.00,
+        },
+        50_000,
+    )
+
+    assert result.snapshot is pipeline.snapshot
+    assert result.snapshot.locked is True
+    assert result.snapshot.model_version == "Q200-V3.1"
+
+
+# =========================================================
+# PIPELINE - INVALID ODDS
+# =========================================================
+
+def test_pipeline_rejects_invalid_odds():
+
+    stats = TeamStats(
+        2.0,
+        1.2,
+        1.5,
+        1.8,
+        1.1,
+        1.0,
+        1.4,
+    )
+
+    pipeline = Q200Pipeline(stats)
+
+    with pytest.raises(ValueError):
+
+        pipeline.analyze_odds(
+            {
+                "HOME": 1.0,
+                "DRAW": 3.5,
+                "AWAY": 4.0,
+            },
+            50_000,
+        )
+
+
+# =========================================================
+# PIPELINE - INVALID BANKROLL
+# =========================================================
+
+def test_pipeline_rejects_invalid_bankroll():
+
+    stats = TeamStats(
+        2.0,
+        1.2,
+        1.5,
+        1.8,
+        1.1,
+        1.0,
+        1.4,
+    )
+
+    pipeline = Q200Pipeline(stats)
+
+    with pytest.raises(ValueError):
+
+        pipeline.analyze_odds(
+            {
+                "HOME": 2.0,
+                "DRAW": 3.5,
+                "AWAY": 4.0,
+            },
+            0,
+        )
+
+
+# =========================================================
+# PIPELINE - EMPTY ODDS
+# =========================================================
+
+def test_pipeline_rejects_empty_odds():
+
+    stats = TeamStats(
+        2.0,
+        1.2,
+        1.5,
+        1.8,
+        1.1,
+        1.0,
+        1.4,
+    )
+
+    pipeline = Q200Pipeline(stats)
+
+    with pytest.raises(ValueError):
+
+        pipeline.analyze_odds(
+            {},
+            50_000,
+        )
+
+
+# =========================================================
+# PIPELINE - ODDS TYPE VALIDATION
+# =========================================================
+
+def test_pipeline_rejects_non_dict_odds():
+
+    stats = TeamStats(
+        2.0,
+        1.2,
+        1.5,
+        1.8,
+        1.1,
+        1.0,
+        1.4,
+    )
+
+    pipeline = Q200Pipeline(stats)
+
+    with pytest.raises(TypeError):
+
+        pipeline.analyze_odds(
+            ["HOME", 2.0],
+            50_000,
+        )
+
+
+# =========================================================
+# PIPELINE - UNCERTAINTY VALIDATION
+# =========================================================
+
+def test_pipeline_rejects_invalid_uncertainty():
+
+    stats = TeamStats(
+        2.0,
+        1.2,
+        1.5,
+        1.8,
+        1.1,
+        1.0,
+        1.4,
+    )
+
+    pipeline = Q200Pipeline(stats)
+
+    with pytest.raises(ValueError):
+
+        pipeline.analyze_odds(
+            {
+                "HOME": 2.0,
+                "DRAW": 3.5,
+                "AWAY": 4.0,
+            },
+            50_000,
+            uncertainty="INVALID",
+        )
