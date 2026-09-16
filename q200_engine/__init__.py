@@ -69,6 +69,12 @@ from .settlement import (
     settle_analysis_record,
 )
 
+from .performance import (
+    PERFORMANCE_VERSION,
+    PerformanceSummary,
+    summarize_history,
+)
+
 
 __all__ = [
     "TeamStats",
@@ -109,4 +115,8 @@ __all__ = [
 
     "SETTLEMENT_VERSION",
     "settle_analysis_record",
+
+    "PERFORMANCE_VERSION",
+    "PerformanceSummary",
+    "summarize_history",
 ]
