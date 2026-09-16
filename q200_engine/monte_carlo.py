@@ -1,43 +1,37 @@
 """
-Q200 Engine - Monte Carlo Layer
+Q200 Engine - Monte Carlo
 
-Stage 2:
-Model -> Monte Carlo
-
-KRİTİK KURALLAR:
-- Odds kullanılmaz.
-- Minimum 100.000 iterasyon.
-- Lambda negatif olamaz.
-- Sonuçlar HOME / DRAW / AWAY olarak döner.
+Q200 V3.1
 """
 
 from __future__ import annotations
 
-import math
 import random
-from typing import Dict
+
+from .poisson_model import poisson_pmf
 
 
-MIN_ITERATIONS = 100_000
-
+# =========================================================
+# POISSON RANDOM
+# =========================================================
 
 def _sample_poisson(lam: float) -> int:
     """
-    Poisson dağılımından tek örnek üretir.
-
-    NumPy kullanılmaz.
+    Knuth algoritması.
     """
 
     if lam < 0:
         raise ValueError(
-            "Lambda cannot be negative."
+            "lambda negatif olamaz."
         )
 
-    # Knuth algorithm
-    limit = math.exp(-lam)
+    if lam == 0:
+        return 0
 
-    k = 0
+    limit = pow(2.718281828459045, -lam)
+
     product = 1.0
+    k = 0
 
     while product > limit:
         k += 1
@@ -46,109 +40,46 @@ def _sample_poisson(lam: float) -> int:
     return k - 1
 
 
+# =========================================================
+# SIMULATION
+# =========================================================
+
 def simulate_match(
     lambda_home: float,
     lambda_away: float,
-    iterations: int = MIN_ITERATIONS,
-) -> Dict[str, float]:
-    """
-    Monte Carlo maç simülasyonu.
+    iterations: int = 100_000,
+) -> dict[str, float]:
 
-    Parameters
-    ----------
-    lambda_home:
-        Home takım gol beklentisi.
-
-    lambda_away:
-        Away takım gol beklentisi.
-
-    iterations:
-        Simülasyon sayısı.
-        Minimum 100.000 olmalıdır.
-
-    Returns
-    -------
-    Dict[str, float]
-        HOME / DRAW / AWAY olasılıkları.
-    """
-
-    # -----------------------------------------------------
-    # VALIDATION
-    # -----------------------------------------------------
-
-    if iterations < MIN_ITERATIONS:
+    if iterations < 100_000:
         raise ValueError(
-            "Monte Carlo requires at least "
-            f"{MIN_ITERATIONS} iterations."
+            "Monte Carlo minimum 100000 iteration olmalıdır."
         )
 
-    if lambda_home < 0:
+    if lambda_home < 0 or lambda_away < 0:
         raise ValueError(
-            "lambda_home cannot be negative."
+            "lambda değerleri negatif olamaz."
         )
-
-    if lambda_away < 0:
-        raise ValueError(
-            "lambda_away cannot be negative."
-        )
-
-    # -----------------------------------------------------
-    # COUNTERS
-    # -----------------------------------------------------
 
     home_wins = 0
     draws = 0
     away_wins = 0
 
-    # -----------------------------------------------------
-    # SIMULATION
-    # -----------------------------------------------------
-
     for _ in range(iterations):
 
-        home_goals = _sample_poisson(
-            lambda_home
-        )
-
-        away_goals = _sample_poisson(
-            lambda_away
-        )
+        home_goals = _sample_poisson(lambda_home)
+        away_goals = _sample_poisson(lambda_away)
 
         if home_goals > away_goals:
-
             home_wins += 1
 
         elif home_goals == away_goals:
-
             draws += 1
 
         else:
-
             away_wins += 1
 
-    # -----------------------------------------------------
-    # TOTAL
-    # -----------------------------------------------------
-
-    total = (
-        home_wins
-        + draws
-        + away_wins
-    )
-
-    if total <= 0:
-        raise RuntimeError(
-            "Monte Carlo produced no valid simulations."
-        )
-
-    # -----------------------------------------------------
-    # PROBABILITIES
-    # -----------------------------------------------------
-
-    probabilities = {
-        "HOME": home_wins / total,
-        "DRAW": draws / total,
-        "AWAY": away_wins / total,
+    return {
+        "HOME": home_wins / iterations,
+        "DRAW": draws / iterations,
+        "AWAY": away_wins / iterations,
     }
-
-    return probabilities
