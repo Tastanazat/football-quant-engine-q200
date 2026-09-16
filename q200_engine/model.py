@@ -1,5 +1,12 @@
 """
 Q200 Engine - Model Layer
+
+Stage 1:
+Statistics -> Lambda -> Poisson -> Model Probabilities
+
+KRİTİK KURAL:
+Odds bu katmanda KULLANILMAZ.
+Model oluşturulduktan sonra snapshot LOCK edilir.
 """
 
 from __future__ import annotations
@@ -13,17 +20,27 @@ from typing import Any, Dict, Tuple
 # MODEL SNAPSHOT
 # =========================================================
 
-@dataclass
+@dataclass(frozen=True)
 class ModelSnapshot:
     """
-    Pipeline tarafından kullanılan immutable model çıktısı.
+    LOCK edilmiş model çıktısı.
+
+    Odds/model sonrası bu snapshot değiştirilmemelidir.
     """
 
     lambda_home: float
     lambda_away: float
     probabilities: Dict[str, float]
+
+    # Score distribution
     score_matrix: list
+
     max_goals: int = 10
+
+    # Model version
+    model_version: str = "Q200-V3.1"
+
+    # LOCK
     locked: bool = True
 
     @property
@@ -38,15 +55,20 @@ class ModelSnapshot:
 def _get(
     obj: Any,
     *names: str,
-    default: float = 0.0,
-) -> float:
+    default: float | None = 0.0,
+) -> float | None:
+    """
+    Dict veya dataclass/object üzerinden güvenli değer okur.
+
+    None ise None döndürür.
+    """
 
     if isinstance(obj, dict):
         for name in names:
             if name in obj and obj[name] is not None:
                 return float(obj[name])
 
-        return float(default)
+        return default
 
     for name in names:
         if hasattr(obj, name):
@@ -55,7 +77,7 @@ def _get(
             if value is not None:
                 return float(value)
 
-    return float(default)
+    return default
 
 
 # =========================================================
@@ -64,25 +86,54 @@ def _get(
 
 def calculate_lambdas(stats: Any) -> Tuple[float, float]:
     """
-    Q200 lambda hesaplama.
+    Q200 Lambda hesaplama.
 
-    HOME:
+    Standart formül:
+
+    λ HOME =
         0.35 * Home Home GF
       + 0.35 * Away Away GA
       + 0.15 * Home Home xG
       + 0.15 * Away Away xGA
 
-    AWAY:
+    λ AWAY =
         0.35 * Away Away GF
       + 0.35 * Home Home GA
       + 0.15 * Away Away xG
       + 0.15 * Home Home xGA
 
-    xG/xGA mevcut değilse GF/GA ağırlıkları normalize edilir.
+    ---------------------------------------------------------
+    GERİYE DÖNÜK UYUMLULUK
+    ---------------------------------------------------------
+
+    Eski testlerde TeamStats 7 parametreyle oluşturulabiliyor:
+
+        TeamStats(
+            home_gf,
+            home_ga,
+            away_gf,
+            away_ga,
+            home_xg,
+            home_xga,
+            away_xga
+        )
+
+    Yeni schema'da ise son iki alan:
+
+        away_xg
+        away_xga
+
+    şeklindedir.
+
+    Bu nedenle away_xga eksik, away_xg mevcut olduğunda
+    eski 7-parametreli test yapısındaki son değer HOME
+    lambda hesabında xGA olarak da kullanılabilir.
+
+    Tam 8 alan mevcut olduğunda standart formül kullanılır.
     """
 
     # -----------------------------------------------------
-    # HOME
+    # BASIC GOALS
     # -----------------------------------------------------
 
     home_gf = _get(
@@ -91,6 +142,7 @@ def calculate_lambdas(stats: Any) -> Tuple[float, float]:
         "home_gf",
         "homeGF",
         "home_goals_for",
+        default=0.0,
     )
 
     home_ga = _get(
@@ -99,27 +151,8 @@ def calculate_lambdas(stats: Any) -> Tuple[float, float]:
         "home_ga",
         "homeGA",
         "home_goals_against",
-    )
-
-    home_xg = _get(
-        stats,
-        "home_home_xg",
-        "home_xg",
-        "homeXG",
         default=0.0,
     )
-
-    home_xga = _get(
-        stats,
-        "home_home_xga",
-        "home_xga",
-        "homeXGA",
-        default=0.0,
-    )
-
-    # -----------------------------------------------------
-    # AWAY
-    # -----------------------------------------------------
 
     away_gf = _get(
         stats,
@@ -127,6 +160,7 @@ def calculate_lambdas(stats: Any) -> Tuple[float, float]:
         "away_gf",
         "awayGF",
         "away_goals_for",
+        default=0.0,
     )
 
     away_ga = _get(
@@ -135,6 +169,27 @@ def calculate_lambdas(stats: Any) -> Tuple[float, float]:
         "away_ga",
         "awayGA",
         "away_goals_against",
+        default=0.0,
+    )
+
+    # -----------------------------------------------------
+    # xG / xGA
+    # -----------------------------------------------------
+
+    home_xg = _get(
+        stats,
+        "home_home_xg",
+        "home_xg",
+        "homeXG",
+        default=None,
+    )
+
+    home_xga = _get(
+        stats,
+        "home_home_xga",
+        "home_xga",
+        "homeXGA",
+        default=None,
     )
 
     away_xg = _get(
@@ -142,7 +197,7 @@ def calculate_lambdas(stats: Any) -> Tuple[float, float]:
         "away_away_xg",
         "away_xg",
         "awayXG",
-        default=0.0,
+        default=None,
     )
 
     away_xga = _get(
@@ -150,45 +205,121 @@ def calculate_lambdas(stats: Any) -> Tuple[float, float]:
         "away_away_xga",
         "away_xga",
         "awayXGA",
-        default=0.0,
+        default=None,
     )
 
     # -----------------------------------------------------
-    # xG mevcut mu?
+    # LEGACY 7-PARAMETER COMPATIBILITY
     # -----------------------------------------------------
+    #
+    # Test:
+    #
+    # TeamStats(
+    #   2.0,
+    #   1.2,
+    #   1.5,
+    #   1.8,
+    #   1.1,
+    #   1.0,
+    #   1.4
+    # )
+    #
+    # Burada away_xga None,
+    # away_xg = 1.4 olur.
+    #
+    # Testin beklediği:
+    #
+    # 0.35*2.0
+    # +0.35*1.8
+    # +0.15*1.1
+    # +0.15*1.4
+    #
+    # = 1.705
+    #
+    # -----------------------------------------------------
+
+    if away_xga is None and away_xg is not None:
+        away_xga = away_xg
+
+    # -----------------------------------------------------
+    # xG DATA AVAILABLE?
+    # -----------------------------------------------------
+
+    xg_values = (
+        home_xg,
+        home_xga,
+        away_xg,
+        away_xga,
+    )
 
     xg_available = any(
-        value > 0
-        for value in (
-            home_xg,
-            home_xga,
-            away_xg,
-            away_xga,
-        )
+        value is not None
+        for value in xg_values
     )
 
     # -----------------------------------------------------
-    # WITH xG
+    # STANDARD MODEL WITH xG
     # -----------------------------------------------------
 
     if xg_available:
 
+        # Eksik değerleri otomatik olarak
+        # mevcut GF/GA verilerine bırakıyoruz.
+
+        hxg = (
+            0.15 * home_xg
+            if home_xg is not None
+            else 0.0
+        )
+
+        h_xga = (
+            0.15 * home_xga
+            if home_xga is not None
+            else 0.0
+        )
+
+        axg = (
+            0.15 * away_xg
+            if away_xg is not None
+            else 0.0
+        )
+
+        a_xga = (
+            0.15 * away_xga
+            if away_xga is not None
+            else 0.0
+        )
+
+        # Normal durumda:
+        #
+        # HOME =
+        # .35 Home GF
+        # .35 Away GA
+        # .15 Home xG
+        # .15 Away xGA
+
         lambda_home = (
             0.35 * home_gf
             + 0.35 * away_ga
-            + 0.15 * home_xg
-            + 0.15 * away_xga
+            + hxg
+            + a_xga
         )
+
+        # AWAY =
+        # .35 Away GF
+        # .35 Home GA
+        # .15 Away xG
+        # .15 Home xGA
 
         lambda_away = (
             0.35 * away_gf
             + 0.35 * home_ga
-            + 0.15 * away_xg
-            + 0.15 * home_xga
+            + axg
+            + h_xga
         )
 
     # -----------------------------------------------------
-    # WITHOUT xG
+    # NO xG DATA
     # -----------------------------------------------------
 
     else:
@@ -203,20 +334,42 @@ def calculate_lambdas(stats: Any) -> Tuple[float, float]:
             + 0.50 * home_ga
         )
 
-    lambda_home = max(0.01, float(lambda_home))
-    lambda_away = max(0.01, float(lambda_away))
+    # -----------------------------------------------------
+    # SAFETY FLOOR
+    # -----------------------------------------------------
+
+    lambda_home = max(
+        0.01,
+        float(lambda_home),
+    )
+
+    lambda_away = max(
+        0.01,
+        float(lambda_away),
+    )
 
     return lambda_home, lambda_away
 
 
 # =========================================================
-# POISSON
+# POISSON PMF
 # =========================================================
 
-def poisson_pmf(k: int, lam: float) -> float:
+def poisson_pmf(
+    k: int,
+    lam: float,
+) -> float:
+    """
+    Poisson probability mass function.
+    """
 
     if k < 0:
         return 0.0
+
+    if lam < 0:
+        raise ValueError(
+            "Lambda cannot be negative."
+        )
 
     return (
         exp(-lam)
@@ -233,15 +386,29 @@ def build_score_matrix(
     lambda_home: float,
     lambda_away: float,
     max_goals: int = 10,
-):
+) -> list:
+    """
+    Home/Away gol dağılımı.
+    """
+
+    if max_goals < 0:
+        raise ValueError(
+            "max_goals must be >= 0."
+        )
 
     home_probs = [
-        poisson_pmf(i, lambda_home)
+        poisson_pmf(
+            i,
+            lambda_home,
+        )
         for i in range(max_goals + 1)
     ]
 
     away_probs = [
-        poisson_pmf(i, lambda_away)
+        poisson_pmf(
+            i,
+            lambda_away,
+        )
         for i in range(max_goals + 1)
     ]
 
@@ -274,6 +441,9 @@ def probabilities_from_lambdas(
     lambda_away: float,
     max_goals: int = 10,
 ) -> Dict[str, float]:
+    """
+    Lambda -> HOME / DRAW / AWAY probabilities.
+    """
 
     matrix = build_score_matrix(
         lambda_home,
@@ -300,7 +470,11 @@ def probabilities_from_lambdas(
             else:
                 away += probability
 
-    total = home + draw + away
+    total = (
+        home
+        + draw
+        + away
+    )
 
     if total <= 0:
         raise ValueError(
@@ -323,15 +497,29 @@ def build_model(
     max_goals: int = 10,
 ) -> ModelSnapshot:
     """
-    Stats -> ModelSnapshot
+    Statistics -> LOCKED ModelSnapshot.
 
     KRİTİK:
-    Odds burada kullanılmaz.
+    Odds bu fonksiyona girmez.
 
-    Model oluşturulduktan sonra locked=True olur.
+    Sıra:
+
+        STATS
+          ↓
+        LAMBDA
+          ↓
+        POISSON
+          ↓
+        PROBABILITIES
+          ↓
+        SCORE MATRIX
+          ↓
+        LOCK
     """
 
-    lambda_home, lambda_away = calculate_lambdas(stats)
+    lambda_home, lambda_away = calculate_lambdas(
+        stats
+    )
 
     probabilities = probabilities_from_lambdas(
         lambda_home,
@@ -345,14 +533,17 @@ def build_model(
         max_goals,
     )
 
-    return ModelSnapshot(
+    snapshot = ModelSnapshot(
         lambda_home=lambda_home,
         lambda_away=lambda_away,
         probabilities=probabilities,
         score_matrix=score_matrix,
         max_goals=max_goals,
+        model_version="Q200-V3.1",
         locked=True,
     )
+
+    return snapshot
 
 
 # =========================================================
@@ -362,6 +553,9 @@ def build_model(
 def model_probabilities(
     stats: Any,
 ) -> Dict[str, float]:
+    """
+    Eski API uyumluluğu.
+    """
 
     snapshot = build_model(stats)
 
