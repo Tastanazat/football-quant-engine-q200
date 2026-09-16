@@ -3,15 +3,15 @@ Q200 Engine - History Performance
 
 Q200 V3.1
 
-Kalıcı History kayıtlarındaki settlement sonuçlarını toplu olarak
-ölçer.
+History içinde kalıcı olarak saklanan settlement sonuçlarını toplu
+performans metriklerine dönüştürür.
 
 Bu katman:
 - Model hesabı yapmaz.
 - Odds hesabı yapmaz.
 - Selection üretmez.
-- Kayıtlı settlement verisini değiştirmez.
-- Sadece gerçekleşmiş performansı özetler.
+- Settlement verisini değiştirmez.
+- Sadece kayıtlı sonuçları ölçer.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ PERFORMANCE_VERSION = "Q200-PERFORMANCE-V1"
 
 @dataclass(frozen=True)
 class PerformanceSummary:
-    """History settlement performansının toplu özeti."""
+    """History settlement kayıtlarının toplu performans özeti."""
 
     total_analysis_records: int
     completed_matches: int
@@ -48,7 +48,7 @@ class PerformanceSummary:
 
     @property
     def profit(self) -> float:
-        """Geriye dönük kullanım için total_profit alias'ı."""
+        """BacktestSummary ile uyumlu total_profit alias'ı."""
 
         return self.total_profit
 
@@ -57,16 +57,32 @@ def _validate_bankroll(
     value: Any,
 ) -> float:
 
-    try:
-        result = float(value)
+    if isinstance(
+        value,
+        bool,
+    ):
+        raise TypeError(
+            "starting_bankroll sayısal olmalıdır."
+        )
 
-    except (TypeError, ValueError) as exc:
+    try:
+
+        result = float(
+            value
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ) as exc:
 
         raise ValueError(
             "starting_bankroll sayısal olmalıdır."
         ) from exc
 
-    if not isfinite(result):
+    if not isfinite(
+        result
+    ):
 
         raise ValueError(
             "starting_bankroll sonlu bir sayı olmalıdır."
@@ -81,31 +97,77 @@ def _validate_bankroll(
     return result
 
 
-def _validate_records(
-    records: Any,
-) -> list[dict[str, Any]]:
+def _validate_history(
+    history: Any,
+) -> None:
 
-    if not isinstance(
-        records,
-        list,
-    ):
+    if history is None:
 
         raise TypeError(
-            "records list olmalıdır."
+            "history verilmelidir."
         )
 
-    for record in records:
+    required_methods = (
+        "count",
+        "count_completed",
+        "list",
+        "get",
+    )
 
-        if not isinstance(
-            record,
-            dict,
+    for method in required_methods:
+
+        if not callable(
+            getattr(
+                history,
+                method,
+                None,
+            )
         ):
 
             raise TypeError(
-                "Her history record dictionary olmalıdır."
+                "history AnalysisHistory benzeri "
+                "bir repository olmalıdır."
             )
 
-    return records
+
+def _number(
+    value: Any,
+    name: str,
+) -> float:
+
+    if isinstance(
+        value,
+        bool,
+    ):
+
+        raise TypeError(
+            f"{name} sayısal olmalıdır."
+        )
+
+    try:
+
+        result = float(
+            value
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ) as exc:
+
+        raise ValueError(
+            f"{name} sayısal olmalıdır."
+        ) from exc
+
+    if not isfinite(
+        result
+    ):
+
+        raise ValueError(
+            f"{name} sonlu bir sayı olmalıdır."
+        )
+
+    return result
 
 
 def summarize_history(
@@ -114,60 +176,57 @@ def summarize_history(
     starting_bankroll: float = 0.0,
 ) -> PerformanceSummary:
     """
-    AnalysisHistory içindeki settlement kayıtlarını özetler.
+    History içindeki settlement sonuçlarını toplu olarak hesaplar.
 
     Yalnızca settlement_recorded=True olan kayıtların bahis sonuçları
     performans hesabına dahil edilir.
     """
 
-    if history is None:
-
-        raise TypeError(
-            "history verilmelidir."
-        )
+    _validate_history(
+        history
+    )
 
     starting_bankroll = _validate_bankroll(
         starting_bankroll
     )
 
-    total_analysis_records = history.count()
+    total_analysis_records = (
+        history.count()
+    )
 
-    records = history.list(
-        limit=max(
-            total_analysis_records,
-            1,
+    completed_matches = (
+        history.count_completed()
+    )
+
+    if total_analysis_records > 0:
+
+        records = history.list(
+            limit=total_analysis_records
         )
-    )
 
-    completed_matches = sum(
-        1
-        for record in records
-        if record.get(
-            "result_recorded"
-        ) is True
-    )
+    else:
 
-    settled_records: list[
-        dict[str, Any]
-    ] = []
+        records = []
 
-    for record in records:
+    settled_records = []
 
-        if record.get(
+    for item in records:
+
+        if item.get(
             "settlement_recorded"
         ) is not True:
 
             continue
 
-        full_record = history.get(
-            record["id"]
+        record = history.get(
+            item["id"]
         )
 
-        if full_record is None:
+        if record is None:
 
             continue
 
-        settlement = full_record.get(
+        settlement = record.get(
             "settlement"
         )
 
@@ -176,7 +235,9 @@ def summarize_history(
             dict,
         ):
 
-            continue
+            raise ValueError(
+                "Settlement kaydı dictionary olmalıdır."
+            )
 
         settled_records.append(
             settlement
@@ -191,6 +252,13 @@ def summarize_history(
         - settled_matches
     )
 
+    if unsettled_completed_matches < 0:
+
+        raise ValueError(
+            "Settlement sayısı sonuçlanmış "
+            "maç sayısından fazla olamaz."
+        )
+
     total_bets = 0
     wins = 0
     losses = 0
@@ -201,23 +269,9 @@ def summarize_history(
 
     for settlement in settled_records:
 
-        summary = settlement.get(
-            "summary"
-        )
-
         selections = settlement.get(
-            "selections",
-            [],
+            "selections"
         )
-
-        if not isinstance(
-            summary,
-            dict,
-        ):
-
-            raise ValueError(
-                "Settlement summary dictionary olmalıdır."
-            )
 
         if not isinstance(
             selections,
@@ -228,8 +282,6 @@ def summarize_history(
                 "Settlement selections list olmalıdır."
             )
 
-        # Gerçek settlement satırlarını canonical
-        # kaynak kabul ediyoruz.
         for selection in selections:
 
             if not isinstance(
@@ -238,17 +290,18 @@ def summarize_history(
             ):
 
                 raise ValueError(
-                    "Settlement selection dictionary olmalıdır."
+                    "Settlement selection "
+                    "dictionary olmalıdır."
                 )
 
-            settlement_result = str(
+            outcome = str(
                 selection.get(
                     "settlement",
                     "",
                 )
             ).strip().upper()
 
-            if settlement_result not in {
+            if outcome not in {
                 "WIN",
                 "LOSS",
                 "VOID",
@@ -259,39 +312,19 @@ def summarize_history(
                     f"{selection.get('settlement')}"
                 )
 
-            try:
+            stake = _number(
+                selection.get(
+                    "stake"
+                ),
+                "stake",
+            )
 
-                stake = float(
-                    selection.get(
-                        "stake",
-                        0.0,
-                    )
-                )
-
-                profit = float(
-                    selection.get(
-                        "profit",
-                        0.0,
-                    )
-                )
-
-            except (
-                TypeError,
-                ValueError,
-            ) as exc:
-
-                raise ValueError(
-                    "Settlement stake/profit sayısal olmalıdır."
-                ) from exc
-
-            if (
-                not isfinite(stake)
-                or not isfinite(profit)
-            ):
-
-                raise ValueError(
-                    "Settlement stake/profit sonlu olmalıdır."
-                )
+            profit = _number(
+                selection.get(
+                    "profit"
+                ),
+                "profit",
+            )
 
             if stake < 0:
 
@@ -305,11 +338,11 @@ def summarize_history(
 
             total_profit += profit
 
-            if settlement_result == "WIN":
+            if outcome == "WIN":
 
                 wins += 1
 
-            elif settlement_result == "LOSS":
+            elif outcome == "LOSS":
 
                 losses += 1
 
@@ -353,55 +386,42 @@ def summarize_history(
         total_analysis_records=(
             total_analysis_records
         ),
-
         completed_matches=(
             completed_matches
         ),
-
         settled_matches=(
             settled_matches
         ),
-
         unsettled_completed_matches=(
             unsettled_completed_matches
         ),
-
         total_bets=(
             total_bets
         ),
-
         wins=(
             wins
         ),
-
         losses=(
             losses
         ),
-
         voids=(
             voids
         ),
-
         total_stake=(
             total_stake
         ),
-
         total_profit=(
             total_profit
         ),
-
         roi=(
             roi
         ),
-
         hit_rate=(
             hit_rate
         ),
-
         starting_bankroll=(
             starting_bankroll
         ),
-
         ending_bankroll=(
             ending_bankroll
         ),
