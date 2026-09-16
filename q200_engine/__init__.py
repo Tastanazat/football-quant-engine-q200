@@ -48,6 +48,10 @@ from .file_pipeline import (
     run_pipeline_from_files,
 )
 
+from .analyzer import (
+    run_q200_from_files,
+)
+
 
 __all__ = [
     "TeamStats",
@@ -75,4 +79,6 @@ __all__ = [
     "Q200Pipeline",
 
     "run_pipeline_from_files",
+
+    "run_q200_from_files",
 ]
