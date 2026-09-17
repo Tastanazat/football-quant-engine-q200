@@ -11,23 +11,17 @@ Feature Selection
       ↓
 MODEL'E GİRECEK FEATURELER
 
-Bu katman feature'ları otomatik olarak silmez.
-
-Amaç:
-- eksikliği yüksek feature'ları işaretlemek
-- sabit feature'ları işaretlemek
-- yüksek korelasyonlu feature çiftlerini işaretlemek
-- seçim gerekçelerini kayıt altına almak
-- model katmanına hangi feature'ların gönderileceğini
-  açık ve denetlenebilir hale getirmek
+Bu katman feature'ları sessizce silmez. Feature Quality raporunu
+kullanarak her feature için KEEP / REVIEW / EXCLUDE kararını ve
+kararın gerekçelerini üretir.
 
 ÖNEMLİ:
 - Model hesabı yapmaz.
 - Lambda hesaplamaz.
 - Odds kullanmaz.
-- Selection / Kelly hesabı yapmaz.
+- Kelly / stake hesabı yapmaz.
 - Mevcut Q200 V3.1 modelini değiştirmez.
-- Feature'ları sessizce silmez.
+- Feature Quality katmanındaki veriyi değiştirmez.
 """
 
 from __future__ import annotations
@@ -37,28 +31,27 @@ from typing import Any, Iterable, Mapping
 
 from .feature_quality import (
     DEFAULT_CORRELATION_THRESHOLD,
+    FeaturePair,
+    FeatureQuality,
     FeatureQualityReport,
 )
 
 
 FEATURE_SELECTION_VERSION = "Q200-FEATURE-SELECTION-V1"
 
-DEFAULT_MISSINGNESS_THRESHOLD = 0.50
+# Mevcut public API ile uyumluluk.
+DEFAULT_MAX_MISSING_RATE = 0.50
+DEFAULT_REDUNDANCY_CORRELATION = DEFAULT_CORRELATION_THRESHOLD
+
+# Yeni isim.
+DEFAULT_MISSINGNESS_THRESHOLD = DEFAULT_MAX_MISSING_RATE
+
+DECISIONS = ("KEEP", "REVIEW", "EXCLUDE")
 
 
 @dataclass(frozen=True)
 class FeatureSelectionDecision:
-    """
-    Tek bir feature için seçim kararı.
-
-    action:
-        KEEP
-        REVIEW
-        EXCLUDE
-
-    Q200 şu aşamada otomatik EXCLUDE uygulamaz.
-    EXCLUDE yalnızca açıkça verilen manuel seçimlerde kullanılabilir.
-    """
+    """Tek feature için seçim kararı."""
 
     feature_name: str
     action: str
@@ -71,12 +64,7 @@ class FeatureSelectionDecision:
 
 @dataclass(frozen=True)
 class FeatureSelectionReport:
-    """
-    Feature selection raporu.
-
-    Bu rapor model parametrelerini değiştirmez.
-    Yalnızca feature seçiminin gerekçesini kayıt altına alır.
-    """
+    """Feature selection sonucu."""
 
     version: str
     observation_count: int
@@ -89,18 +77,27 @@ class FeatureSelectionReport:
     missingness_threshold: float
     correlation_threshold: float
 
+    @property
+    def selected_feature_count(self) -> int:
+        return len(self.selected_features)
+
+    @property
+    def review_feature_count(self) -> int:
+        return len(self.review_features)
+
+    @property
+    def excluded_feature_count(self) -> int:
+        return len(self.excluded_features)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
 
 def _validate_threshold(
     value: float,
     *,
     name: str,
-    minimum: float = 0.0,
-    maximum: float = 1.0,
 ) -> float:
-    """
-    Threshold değerini doğrular.
-    """
-
     if isinstance(value, bool):
         raise TypeError(f"{name} sayı olmalıdır.")
 
@@ -109,9 +106,15 @@ def _validate_threshold(
     except (TypeError, ValueError) as exc:
         raise TypeError(f"{name} sayı olmalıdır.") from exc
 
-    if numeric < minimum or numeric > maximum:
+    if numeric != numeric:
+        raise ValueError(f"{name} finite olmalıdır.")
+
+    if numeric in (float("inf"), float("-inf")):
+        raise ValueError(f"{name} finite olmalıdır.")
+
+    if not 0.0 <= numeric <= 1.0:
         raise ValueError(
-            f"{name} {minimum} ile {maximum} arasında olmalıdır."
+            f"{name} 0 ile 1 arasında olmalıdır."
         )
 
     return numeric
@@ -129,13 +132,10 @@ def _validate_quality_report(
 
 
 def _quality_reason(
-    quality: Any,
+    quality: FeatureQuality,
     *,
     missingness_threshold: float,
 ) -> list[str]:
-    """
-    Feature Quality çıktısından seçim gerekçelerini üretir.
-    """
 
     reasons: list[str] = []
 
@@ -143,101 +143,94 @@ def _quality_reason(
         reasons.append("NO_OBSERVATIONS")
         return reasons
 
-    if quality.completeness < (1.0 - missingness_threshold):
+    if quality.valid_count <= 0:
+        reasons.append("NO_VALID_VALUES")
+
+    missing_rate = (
+        quality.missing_count / quality.observation_count
+        if quality.observation_count > 0
+        else 1.0
+    )
+
+    if missing_rate > missingness_threshold:
         reasons.append("HIGH_MISSINGNESS")
 
     if quality.constant:
         reasons.append("CONSTANT_FEATURE")
 
-    if quality.valid_count <= 0:
-        reasons.append("NO_VALID_VALUES")
-
     return reasons
 
 
 def _redundant_feature_names(
-    redundant_pairs: Iterable[Any],
+    redundant_pairs: Iterable[FeaturePair],
 ) -> set[str]:
-    """
-    Feature Quality redundant pair listesinden feature isimlerini çıkarır.
-    """
 
     names: set[str] = set()
 
     for pair in redundant_pairs:
-        feature_a = getattr(pair, "feature_a", None)
-        feature_b = getattr(pair, "feature_b", None)
 
-        if isinstance(feature_a, str):
-            names.add(feature_a)
+        if isinstance(pair.feature_a, str):
+            names.add(pair.feature_a)
 
-        if isinstance(feature_b, str):
-            names.add(feature_b)
+        if isinstance(pair.feature_b, str):
+            names.add(pair.feature_b)
 
     return names
 
 
-def build_feature_selection(
+def _build_report(
     report: FeatureQualityReport,
     *,
-    missingness_threshold: float = DEFAULT_MISSINGNESS_THRESHOLD,
-    correlation_threshold: float = DEFAULT_CORRELATION_THRESHOLD,
+    missingness_threshold: float,
+    correlation_threshold: float,
 ) -> FeatureSelectionReport:
-    """
-    Feature Quality raporundan Feature Selection raporu üretir.
 
-    Kurallar:
-
-    1. Feature'ın gözlemi yoksa REVIEW.
-    2. Feature'ın geçerli değeri yoksa REVIEW.
-    3. Missingness threshold aşılırsa REVIEW.
-    4. Constant feature REVIEW.
-    5. Yüksek korelasyonlu feature'lar REVIEW.
-    6. Hiçbir problem yoksa KEEP.
-
-    Otomatik EXCLUDE yapılmaz.
-    """
-
-    report = _validate_quality_report(report)
-
-    missingness_threshold = _validate_threshold(
-        missingness_threshold,
-        name="missingness_threshold",
+    redundant_pairs = tuple(
+        report.redundant_pairs
     )
-
-    correlation_threshold = _validate_threshold(
-        correlation_threshold,
-        name="correlation_threshold",
-    )
-
-    redundant_pairs = tuple(report.redundant_pairs)
 
     redundant_names = _redundant_feature_names(
         redundant_pairs
     )
 
-    decisions: list[FeatureSelectionDecision] = []
+    decisions: list[
+        FeatureSelectionDecision
+    ] = []
 
-    for quality in report.features:
+    # FeatureQualityReport.features:
+    # dict[str, FeatureQuality]
+    #
+    # sorted() kullanımı çıktının deterministik
+    # olmasını sağlar.
+
+    for feature_name in sorted(report.features):
+
+        quality = report.features[feature_name]
+
         reasons = _quality_reason(
             quality,
             missingness_threshold=missingness_threshold,
         )
 
-        if quality.feature_name in redundant_names:
-            reasons.append("HIGH_CORRELATION")
+        if feature_name in redundant_names:
+            reasons.append(
+                "HIGH_CORRELATION"
+            )
 
-        # Duplicate reason koruması.
-        reasons = list(dict.fromkeys(reasons))
+        # Aynı sebebin iki kez eklenmesini engeller.
+        reasons = list(
+            dict.fromkeys(reasons)
+        )
 
-        if reasons:
-            action = "REVIEW"
-        else:
-            action = "KEEP"
+        action = (
+            "REVIEW"
+            if reasons
+            else "KEEP"
+        )
 
         decisions.append(
             FeatureSelectionDecision(
-                feature_name=quality.feature_name,
+                feature_name=feature_name,
                 action=action,
                 reasons=tuple(reasons),
                 completeness=quality.completeness,
@@ -248,21 +241,21 @@ def build_feature_selection(
         )
 
     selected_features = tuple(
-        decision.feature_name
-        for decision in decisions
-        if decision.action == "KEEP"
+        item.feature_name
+        for item in decisions
+        if item.action == "KEEP"
     )
 
     review_features = tuple(
-        decision.feature_name
-        for decision in decisions
-        if decision.action == "REVIEW"
+        item.feature_name
+        for item in decisions
+        if item.action == "REVIEW"
     )
 
     excluded_features = tuple(
-        decision.feature_name
-        for decision in decisions
-        if decision.action == "EXCLUDE"
+        item.feature_name
+        for item in decisions
+        if item.action == "EXCLUDE"
     )
 
     return FeatureSelectionReport(
@@ -285,14 +278,92 @@ def build_feature_selection(
     )
 
 
+def build_feature_selection(
+    report: FeatureQualityReport,
+    *,
+    missingness_threshold: float = DEFAULT_MISSINGNESS_THRESHOLD,
+    correlation_threshold: float = DEFAULT_CORRELATION_THRESHOLD,
+) -> FeatureSelectionReport:
+    """
+    Feature Quality raporundan Feature Selection raporu üretir.
+
+    Kurallar:
+
+    1. Gözlemi olmayan feature REVIEW.
+    2. Geçerli değeri olmayan feature REVIEW.
+    3. Missingness threshold aşılırsa REVIEW.
+    4. Constant feature REVIEW.
+    5. Redundant/high-correlation feature REVIEW.
+    6. Problem olmayan feature KEEP.
+
+    Otomatik EXCLUDE yapılmaz.
+    """
+
+    report = _validate_quality_report(
+        report
+    )
+
+    missingness_threshold = _validate_threshold(
+        missingness_threshold,
+        name="missingness_threshold",
+    )
+
+    correlation_threshold = _validate_threshold(
+        correlation_threshold,
+        name="correlation_threshold",
+    )
+
+    return _build_report(
+        report,
+        missingness_threshold=missingness_threshold,
+        correlation_threshold=correlation_threshold,
+    )
+
+
+def select_features(
+    report: FeatureQualityReport,
+    *,
+    max_missing_rate: float = DEFAULT_MAX_MISSING_RATE,
+    redundancy_correlation: float = DEFAULT_REDUNDANCY_CORRELATION,
+) -> FeatureSelectionReport:
+    """
+    Mevcut public API ile feature selection çalıştırır.
+    """
+
+    return build_feature_selection(
+        report,
+        missingness_threshold=max_missing_rate,
+        correlation_threshold=redundancy_correlation,
+    )
+
+
+def discover_selection_candidates(
+    report: FeatureQualityReport,
+    *,
+    max_missing_rate: float = DEFAULT_MAX_MISSING_RATE,
+    redundancy_correlation: float = DEFAULT_REDUNDANCY_CORRELATION,
+) -> tuple[str, ...]:
+    """
+    REVIEW edilmesi gereken feature adaylarını döndürür.
+    """
+
+    selection = select_features(
+        report,
+        max_missing_rate=max_missing_rate,
+        redundancy_correlation=redundancy_correlation,
+    )
+
+    return selection.review_features
+
+
 def selected_feature_names(
     selection: FeatureSelectionReport,
 ) -> tuple[str, ...]:
-    """
-    KEEP olarak işaretlenen feature isimlerini döndürür.
-    """
 
-    if not isinstance(selection, FeatureSelectionReport):
+    if not isinstance(
+        selection,
+        FeatureSelectionReport,
+    ):
         raise TypeError(
             "selection FeatureSelectionReport olmalıdır."
         )
@@ -303,11 +374,11 @@ def selected_feature_names(
 def review_feature_names(
     selection: FeatureSelectionReport,
 ) -> tuple[str, ...]:
-    """
-    REVIEW olarak işaretlenen feature isimlerini döndürür.
-    """
 
-    if not isinstance(selection, FeatureSelectionReport):
+    if not isinstance(
+        selection,
+        FeatureSelectionReport,
+    ):
         raise TypeError(
             "selection FeatureSelectionReport olmalıdır."
         )
@@ -318,16 +389,60 @@ def review_feature_names(
 def feature_selection_to_dict(
     selection: FeatureSelectionReport,
 ) -> dict[str, Any]:
-    """
-    Selection raporunu JSON uyumlu dictionary'ye çevirir.
-    """
 
-    if not isinstance(selection, FeatureSelectionReport):
+    if not isinstance(
+        selection,
+        FeatureSelectionReport,
+    ):
         raise TypeError(
             "selection FeatureSelectionReport olmalıdır."
         )
 
-    return asdict(selection)
+    return selection.to_dict()
+
+
+def feature_selection_summary(
+    selection: FeatureSelectionReport,
+) -> dict[str, Any]:
+    """
+    Kısa JSON uyumlu selection özeti.
+    """
+
+    if not isinstance(
+        selection,
+        FeatureSelectionReport,
+    ):
+        raise TypeError(
+            "selection FeatureSelectionReport olmalıdır."
+        )
+
+    return {
+        "version": selection.version,
+        "observation_count": (
+            selection.observation_count
+        ),
+        "feature_count": (
+            selection.feature_count
+        ),
+        "selected_feature_count": len(
+            selection.selected_features
+        ),
+        "review_feature_count": len(
+            selection.review_features
+        ),
+        "excluded_feature_count": len(
+            selection.excluded_features
+        ),
+        "selected_features": (
+            selection.selected_features
+        ),
+        "review_features": (
+            selection.review_features
+        ),
+        "excluded_features": (
+            selection.excluded_features
+        ),
+    }
 
 
 def filter_feature_mapping(
@@ -337,31 +452,41 @@ def filter_feature_mapping(
     include_review: bool = False,
 ) -> dict[str, Any]:
     """
-    Feature mapping'i selection raporuna göre filtreler.
+    Feature mapping'i selection sonucuna göre filtreler.
 
     Varsayılan:
         yalnızca KEEP feature'ları döndürür.
 
     include_review=True:
-        KEEP + REVIEW feature'ları döndürür.
+        KEEP + REVIEW döndürür.
 
-    EXCLUDE feature'ları hiçbir durumda döndürülmez.
+    EXCLUDE hiçbir durumda döndürülmez.
     """
 
-    if not isinstance(values, Mapping):
+    if not isinstance(
+        values,
+        Mapping,
+    ):
         raise TypeError(
             "values mapping olmalıdır."
         )
 
-    if not isinstance(selection, FeatureSelectionReport):
+    if not isinstance(
+        selection,
+        FeatureSelectionReport,
+    ):
         raise TypeError(
             "selection FeatureSelectionReport olmalıdır."
         )
 
-    allowed = set(selection.selected_features)
+    allowed = set(
+        selection.selected_features
+    )
 
     if include_review:
-        allowed.update(selection.review_features)
+        allowed.update(
+            selection.review_features
+        )
 
     return {
         key: value
@@ -372,12 +497,18 @@ def filter_feature_mapping(
 
 __all__ = [
     "FEATURE_SELECTION_VERSION",
+    "DEFAULT_MAX_MISSING_RATE",
+    "DEFAULT_REDUNDANCY_CORRELATION",
     "DEFAULT_MISSINGNESS_THRESHOLD",
+    "DECISIONS",
     "FeatureSelectionDecision",
     "FeatureSelectionReport",
+    "discover_selection_candidates",
+    "select_features",
     "build_feature_selection",
     "selected_feature_names",
     "review_feature_names",
     "feature_selection_to_dict",
+    "feature_selection_summary",
     "filter_feature_mapping",
 ]
