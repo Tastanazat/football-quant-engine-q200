@@ -50,6 +50,14 @@ from .data_validator import (
     validation_to_dict,
 )
 
+from .validated_pipeline import (
+    VALIDATED_INGESTION_VERSION,
+    ValidatedCanonicalData,
+    map_and_validate,
+    require_valid,
+    validated_pipeline_to_dict,
+)
+
 
 __all__ = [
     "INGESTION_VERSION",
@@ -80,4 +88,9 @@ __all__ = [
     "validate_canonical_values",
     "validate_canonical_data",
     "validation_to_dict",
+    "VALIDATED_INGESTION_VERSION",
+    "ValidatedCanonicalData",
+    "map_and_validate",
+    "require_valid",
+    "validated_pipeline_to_dict",
 ]
