@@ -229,35 +229,35 @@ def _extract_goal_stats(
             else None
         ),
         home_scoring_rate=_percent_after(
-            r"A.*?scoring rate at home",
+            r"\(A\).*?scoring rate at home",
             text,
         ),
         away_scoring_rate=_percent_after(
-            r"B.*?scoring rate away",
+            r"\(B\).*?scoring rate away",
             text,
         ),
         home_conceding_rate=_percent_after(
-            r"A.*?conceding rate at home",
+            r"\(A\).*?conceding rate at home",
             text,
         ),
         away_conceding_rate=_percent_after(
-            r"B.*?conceding rate away",
+            r"\(B\).*?conceding rate away",
             text,
         ),
         over_1_5=_percent_after(
-            r"A.*?over 1\.5 at home",
+            r"\(A\).*?over 1\.5 at home",
             text,
         ),
         over_2_5=_percent_after(
-            r"A.*?over 2\.5 at home",
+            r"\(A\).*?over 2\.5 at home",
             text,
         ),
         over_3_5=_percent_after(
-            r"A.*?over 3\.5 at home",
+            r"\(A\).*?over 3\.5 at home",
             text,
         ),
         btts=_percent_after(
-            r"A.*?BTS matches at home",
+            r"\(A\).*?BTS matches at home",
             text,
         ),
     )
@@ -368,7 +368,7 @@ def _extract_form(
 ) -> FormStats:
 
     match = re.search(
-        r"Points Per Game PPG\s+"
+        r"Points Per Game \(PPG\)\s+"
         r"Home\s*"
         + _NUM
         + r"\s+"
@@ -578,4 +578,140 @@ def _extract_timing(
         else ""
     )
 
-    gf
+    gf_line = _line(
+        block,
+        "Average minute GF",
+    )
+
+    ga_line = _line(
+        block,
+        "Average minute GA",
+    )
+
+    gf = _numbers(gf_line or "")
+    ga = _numbers(ga_line or "")
+
+    return TimingStats(
+        home_average_goal_minute_for=(
+            gf[0]
+            if len(gf) >= 3
+            else None
+        ),
+        away_average_goal_minute_for=(
+            gf[2]
+            if len(gf) >= 3
+            else None
+        ),
+        home_average_goal_minute_against=(
+            ga[0]
+            if len(ga) >= 3
+            else None
+        ),
+        away_average_goal_minute_against=(
+            ga[2]
+            if len(ga) >= 3
+            else None
+        ),
+    )
+
+
+def parse_soccerstats_text(
+    text: str,
+) -> SoccerStatsData:
+    """
+    Parse extracted SoccerSTATS text.
+
+    PDF okuma yapılmadan parser test edilebilmesi
+    için text parser ayrı tutulur.
+    """
+
+    clean = _clean_text(text)
+
+    match = _extract_match_info(clean)
+
+    sections: dict[str, Any] = {}
+
+    markers = {
+        "goals": "Goal statistics",
+        "corners": "Avg Corners For",
+        "form": "Points Per Game (PPG)",
+        "h2h": "H2H stats: summary of encounters above",
+        "distribution": "Home vs Away distribution",
+        "timing": "Average goal times",
+    }
+
+    for name, marker in markers.items():
+
+        index = clean.lower().find(
+            marker.lower()
+        )
+
+        if index >= 0:
+            sections[name] = clean[
+                index:index + 2500
+            ]
+
+    return SoccerStatsData(
+        match=match,
+        goals=_extract_goal_stats(clean),
+        corners=_extract_corner_stats(clean),
+        form=_extract_form(clean),
+        h2h=_extract_h2h(clean),
+        distribution=_extract_distribution(clean),
+        timing=_extract_timing(clean),
+        raw_sections=sections,
+        source_metadata={
+            "parser": SOCCERSTATS_PARSER_VERSION,
+            "source": "SoccerSTATS",
+        },
+    )
+
+
+def extract_pdf_text(
+    pdf_path: str | Path,
+) -> str:
+    """Extract text from a SoccerSTATS PDF."""
+
+    path = Path(pdf_path)
+
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"PDF bulunamadı: {path}"
+        )
+
+    if path.suffix.lower() != ".pdf":
+        raise ValueError(
+            "SoccerSTATS parser yalnızca PDF kabul eder."
+        )
+
+    reader = PdfReader(str(path))
+
+    text = "\n".join(
+        page.extract_text() or ""
+        for page in reader.pages
+    )
+
+    if not text.strip():
+        raise ValueError(
+            "PDF içinden okunabilir metin çıkarılamadı."
+        )
+
+    return text
+
+
+def parse_soccerstats_pdf(
+    pdf_path: str | Path,
+) -> SoccerStatsData:
+    """Read and parse a SoccerSTATS PDF."""
+
+    return parse_soccerstats_text(
+        extract_pdf_text(pdf_path)
+    )
+
+
+__all__ = [
+    "SOCCERSTATS_PARSER_VERSION",
+    "extract_pdf_text",
+    "parse_soccerstats_text",
+    "parse_soccerstats_pdf",
+]
