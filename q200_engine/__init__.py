@@ -113,13 +113,13 @@ from .data_review import (
 
 from .statshub_ocr import (
     STATSHUB_OCR_VERSION,
-    StatsHubOCRError,
     STAT_LABELS,
     canonical_stat_name,
     parse_number,
     extract_numbers,
     parse_statshub_text,
     parse_statshub_table_text,
+    flatten_statshub_summary,
     ocr_image_to_text,
     create_statshub_review,
 )
@@ -209,13 +209,13 @@ __all__ = [
     "review_to_dict",
 
     "STATSHUB_OCR_VERSION",
-    "StatsHubOCRError",
     "STAT_LABELS",
     "canonical_stat_name",
     "parse_number",
     "extract_numbers",
     "parse_statshub_text",
     "parse_statshub_table_text",
+    "flatten_statshub_summary",
     "ocr_image_to_text",
     "create_statshub_review",
 
