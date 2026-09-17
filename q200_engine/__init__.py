@@ -146,6 +146,20 @@ from .feature_quality import (
     feature_quality_to_dict,
 )
 
+from .feature_selection import (
+    FEATURE_SELECTION_VERSION,
+    DEFAULT_MAX_MISSING_RATE,
+    DEFAULT_REDUNDANCY_CORRELATION,
+    DECISIONS,
+    FeatureSelectionDecision,
+    FeatureSelectionReport,
+    discover_selection_candidates,
+    select_features,
+    selected_feature_names,
+    feature_selection_to_dict,
+    feature_selection_summary,
+)
+
 from .dataset_backtest import (
     DATASET_BACKTEST_VERSION,
     DatasetBacktestItem,
@@ -258,6 +272,18 @@ __all__ = [
     "find_redundant_features",
     "build_feature_quality_report",
     "feature_quality_to_dict",
+
+    "FEATURE_SELECTION_VERSION",
+    "DEFAULT_MAX_MISSING_RATE",
+    "DEFAULT_REDUNDANCY_CORRELATION",
+    "DECISIONS",
+    "FeatureSelectionDecision",
+    "FeatureSelectionReport",
+    "discover_selection_candidates",
+    "select_features",
+    "selected_feature_names",
+    "feature_selection_to_dict",
+    "feature_selection_summary",
 
     "DATASET_BACKTEST_VERSION",
     "DatasetBacktestItem",
