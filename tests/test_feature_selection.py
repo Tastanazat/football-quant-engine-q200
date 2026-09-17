@@ -63,6 +63,18 @@ def make_quality_report():
             constant=False,
         ),
         Quality(
+            feature_name="shots_on_target",
+            observation_count=10,
+            valid_count=10,
+            missing_count=0,
+            completeness=1.0,
+            mean=8.0,
+            minimum=3.0,
+            maximum=14.0,
+            variance=5.0,
+            constant=False,
+        ),
+        Quality(
             feature_name="corners",
             observation_count=10,
             valid_count=8,
@@ -130,67 +142,116 @@ def test_default_thresholds():
 
 
 def test_selection_report_version():
-    report = select_features(make_quality_report())
+    report = select_features(
+        make_quality_report()
+    )
 
     assert report.version == FEATURE_SELECTION_VERSION
-    assert isinstance(report, FeatureSelectionReport)
+    assert isinstance(
+        report,
+        FeatureSelectionReport,
+    )
 
 
-def test_good_feature_is_keep():
-    report = select_features(make_quality_report())
+def test_good_feature_is_redundant_when_highly_correlated():
+    report = select_features(
+        make_quality_report()
+    )
 
     decisions = {
         item.feature_name: item
         for item in report.decisions
     }
 
-    assert decisions["shots"].decision == "REDUNDANT"
+    assert (
+        decisions["shots"].decision
+        == "REDUNDANT"
+    )
+
+    assert (
+        decisions["shots_on_target"].decision
+        == "REDUNDANT"
+    )
 
 
 def test_constant_feature_is_flagged():
-    report = select_features(make_quality_report())
+    report = select_features(
+        make_quality_report()
+    )
 
     decisions = {
         item.feature_name: item
         for item in report.decisions
     }
 
-    assert decisions["constant_feature"].decision == "FLAG"
-    assert "CONSTANT_FEATURE" in decisions["constant_feature"].reasons
+    assert (
+        decisions["constant_feature"].decision
+        == "FLAG"
+    )
+
+    assert (
+        "CONSTANT_FEATURE"
+        in decisions["constant_feature"].reasons
+    )
 
 
 def test_high_missing_feature_is_excluded():
-    report = select_features(make_quality_report())
+    report = select_features(
+        make_quality_report()
+    )
 
     decisions = {
         item.feature_name: item
         for item in report.decisions
     }
 
-    assert decisions["bad_feature"].decision == "EXCLUDE"
-    assert "HIGH_MISSING_RATE" in decisions["bad_feature"].reasons
+    assert (
+        decisions["bad_feature"].decision
+        == "EXCLUDE"
+    )
+
+    assert (
+        "HIGH_MISSING_RATE"
+        in decisions["bad_feature"].reasons
+    )
 
 
 def test_partial_missing_feature_is_flagged():
-    report = select_features(make_quality_report())
+    report = select_features(
+        make_quality_report()
+    )
 
     decisions = {
         item.feature_name: item
         for item in report.decisions
     }
 
-    assert decisions["corners"].decision == "FLAG"
-    assert "PARTIAL_MISSING_DATA" in decisions["corners"].reasons
+    assert (
+        decisions["corners"].decision
+        == "FLAG"
+    )
+
+    assert (
+        "PARTIAL_MISSING_DATA"
+        in decisions["corners"].reasons
+    )
 
 
 def test_high_correlation_creates_redundancy():
-    report = select_features(make_quality_report())
+    report = select_features(
+        make_quality_report()
+    )
 
-    assert ("shots", "shots_on_target") in report.redundant_pairs
+    assert (
+        "shots",
+        "shots_on_target",
+    ) in report.redundant_pairs
 
 
 def test_redundancy_does_not_delete_feature():
-    report = select_features(make_quality_report())
+    report = select_features(
+        make_quality_report()
+    )
 
     names = {
         item.feature_name
@@ -202,7 +263,9 @@ def test_redundancy_does_not_delete_feature():
 
 
 def test_selected_names_default_only_keep():
-    report = select_features(make_quality_report())
+    report = select_features(
+        make_quality_report()
+    )
 
     names = selected_feature_names(report)
 
@@ -210,7 +273,9 @@ def test_selected_names_default_only_keep():
 
 
 def test_selected_names_can_include_flagged():
-    report = select_features(make_quality_report())
+    report = select_features(
+        make_quality_report()
+    )
 
     names = selected_feature_names(
         report,
@@ -222,8 +287,24 @@ def test_selected_names_can_include_flagged():
     assert "bad_feature" not in names
 
 
+def test_selected_names_can_include_redundant():
+    report = select_features(
+        make_quality_report()
+    )
+
+    names = selected_feature_names(
+        report,
+        include_redundant=True,
+    )
+
+    assert "shots" in names
+    assert "shots_on_target" in names
+
+
 def test_summary():
-    report = select_features(make_quality_report())
+    report = select_features(
+        make_quality_report()
+    )
 
     summary = feature_selection_summary(report)
 
@@ -234,13 +315,31 @@ def test_summary():
 
 
 def test_serialization():
-    report = select_features(make_quality_report())
+    report = select_features(
+        make_quality_report()
+    )
 
     data = feature_selection_to_dict(report)
 
     assert data["version"] == FEATURE_SELECTION_VERSION
-    assert isinstance(data["decisions"], list)
-    assert isinstance(data["redundant_pairs"], list)
+    assert isinstance(
+        data["decisions"],
+        list,
+    )
+    assert isinstance(
+        data["redundant_pairs"],
+        list,
+    )
+
+    assert all(
+        isinstance(item, dict)
+        for item in data["decisions"]
+    )
+
+    assert all(
+        isinstance(item["reasons"], list)
+        for item in data["decisions"]
+    )
 
 
 def test_threshold_validation():
@@ -292,5 +391,13 @@ def test_mapping_based_report_is_supported():
     result = select_features(report)
 
     assert result.feature_count == 1
-    assert result.decisions[0].feature_name == "possession"
-    assert result.decisions[0].decision == "KEEP"
+
+    assert (
+        result.decisions[0].feature_name
+        == "possession"
+    )
+
+    assert (
+        result.decisions[0].decision
+        == "KEEP"
+    )
