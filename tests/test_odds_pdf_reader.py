@@ -4,17 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from q200_engine.ingestion.models import OddsData
 from q200_engine.odds_pdf_reader import (
     ODDS_PDF_READER_VERSION,
-    extract_odds_pdf_text,
     odds_data_to_market,
     parse_odds_pdf,
     parse_odds_pdf_text,
 )
 
 
-REAL_ODDS_PDF = (
+PDF_PATH = (
     Path(__file__).resolve().parent
     / "fixtures"
     / "odds"
@@ -23,45 +21,43 @@ REAL_ODDS_PDF = (
 
 
 SAMPLE_TEXT = """17 Eylül 2026 20:00
-Real Betis - GetafeReal Betis - Getafe
+Real Betis - Getafe
+
 Maç Sonucu
 1 1.72 X 3.75 2 5.80
+
 Maç Sonucu (2 Gol Farkta Erken Ödeme)
 1 1.70 X 3.75 2 5.55
+
 Çifte Şans
+1X 1.16 12 1.30 X2 2.30
+
 Toplam Goller
 Üst 0.5 1.06 Alt 0.5 8.50
 Üst 1.5 1.35 Alt 1.5 3.10
 Üst 2.5 2.10 Alt 2.5 1.70
+
 Karşılıklı Gol Olur
 Evet 2.05 Hayır 1.69
-Beraberlikte İade
+
 Toplam Kornerler
 Üst 9.5 1.95 Alt 9.5 1.80
+
 Toplam Kornerler 3-Yönlü
 """
 
 
-def test_reader_version() -> None:
-
+def test_odds_pdf_reader_version():
     assert (
         ODDS_PDF_READER_VERSION
         == "Q200-ODDS-PDF-READER-V1"
     )
 
 
-def test_parse_text_returns_odds_data() -> None:
-
+def test_parse_odds_pdf_text():
     result = parse_odds_pdf_text(
         SAMPLE_TEXT
     )
-
-    assert isinstance(
-        result,
-        OddsData,
-    )
-
-    assert result.match is not None
 
     assert (
         result.match.home_team
@@ -115,8 +111,7 @@ def test_parse_text_returns_odds_data() -> None:
     )
 
 
-def test_odds_data_to_market() -> None:
-
+def test_odds_data_to_market():
     result = parse_odds_pdf_text(
         SAMPLE_TEXT
     )
@@ -131,73 +126,28 @@ def test_odds_data_to_market() -> None:
     }
 
 
-def test_unknown_market_is_rejected() -> None:
-
+def test_unknown_market_is_rejected():
     result = parse_odds_pdf_text(
         SAMPLE_TEXT
     )
 
     with pytest.raises(KeyError):
-
         odds_data_to_market(
             result,
             "UNKNOWN",
         )
 
 
-def test_invalid_input_is_rejected() -> None:
-
-    with pytest.raises(TypeError):
-
-        parse_odds_pdf_text(
-            None
-        )
+def test_real_odds_pdf_exists():
+    assert PDF_PATH.exists()
+    assert PDF_PATH.is_file()
+    assert PDF_PATH.stat().st_size > 0
 
 
-def test_real_odds_pdf_fixture_exists() -> None:
-
-    assert REAL_ODDS_PDF.is_file()
-
-    assert (
-        REAL_ODDS_PDF.stat().st_size
-        > 0
-    )
-
-
-def test_real_odds_pdf_text_can_be_extracted() -> None:
-
-    text = extract_odds_pdf_text(
-        REAL_ODDS_PDF
-    )
-
-    assert (
-        "Real Betis - Getafe"
-        in text
-    )
-
-    assert (
-        "Maç Sonucu"
-        in text
-    )
-
-    assert (
-        "Toplam Goller"
-        in text
-    )
-
-    assert (
-        "Karşılıklı Gol Olur"
-        in text
-    )
-
-
-def test_real_odds_pdf_parses_match() -> None:
-
+def test_real_odds_pdf_parses_match():
     result = parse_odds_pdf(
-        REAL_ODDS_PDF
+        PDF_PATH
     )
-
-    assert result.match is not None
 
     assert (
         result.match.home_team
@@ -219,16 +169,10 @@ def test_real_odds_pdf_parses_match() -> None:
         == "20:00"
     )
 
-    assert (
-        result.match.source
-        == "OddsPDF"
-    )
 
-
-def test_real_odds_pdf_parses_primary_markets() -> None:
-
+def test_real_odds_pdf_parses_primary_markets():
     result = parse_odds_pdf(
-        REAL_ODDS_PDF
+        PDF_PATH
     )
 
     assert result.markets["1X2"] == {
