@@ -97,6 +97,20 @@ from .evaluation import (
     evaluation_to_text,
 )
 
+from .data_review import (
+    DATA_REVIEW_VERSION,
+    SOURCE_TYPES,
+    VALUE_STATUSES,
+    ReviewField,
+    DataReview,
+    create_review,
+    update_review_field,
+    approve_review,
+    revoke_review,
+    reviewed_values,
+    review_to_dict,
+)
+
 from .dataset_backtest import (
     DATASET_BACKTEST_VERSION,
     DatasetBacktestItem,
@@ -168,6 +182,18 @@ __all__ = [
     "evaluation_to_dict",
     "evaluation_to_json",
     "evaluation_to_text",
+
+    "DATA_REVIEW_VERSION",
+    "SOURCE_TYPES",
+    "VALUE_STATUSES",
+    "ReviewField",
+    "DataReview",
+    "create_review",
+    "update_review_field",
+    "approve_review",
+    "revoke_review",
+    "reviewed_values",
+    "review_to_dict",
 
     "DATASET_BACKTEST_VERSION",
     "DatasetBacktestItem",
