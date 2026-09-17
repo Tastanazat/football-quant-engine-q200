@@ -124,6 +124,13 @@ from .statshub_ocr import (
     create_statshub_review,
 )
 
+from .feature_engine import (
+    FEATURE_ENGINE_VERSION,
+    FeatureSet,
+    build_features,
+    feature_set_to_dict,
+)
+
 from .dataset_backtest import (
     DATASET_BACKTEST_VERSION,
     DatasetBacktestItem,
@@ -218,6 +225,11 @@ __all__ = [
     "flatten_statshub_summary",
     "ocr_image_to_text",
     "create_statshub_review",
+
+    "FEATURE_ENGINE_VERSION",
+    "FeatureSet",
+    "build_features",
+    "feature_set_to_dict",
 
     "DATASET_BACKTEST_VERSION",
     "DatasetBacktestItem",
