@@ -3,26 +3,14 @@ Q200 Engine - StatsHub OCR
 
 Q200 V3.1
 
-StatsHub ekran görüntülerini OCR ile okuyup zengin statistics
-verisine dönüştürür.
+StatsHub fixture ekran görüntülerinden görünen istatistik satırlarını
+OCR ile okuyup Data Review katmanına hazırlar.
 
-Akış:
-
-IMAGE
-  ↓
-OCR
-  ↓
-ROW DETECTION
-  ↓
-STAT LABEL MAPPING
-  ↓
-RAW VALUES
-  ↓
-DATA REVIEW
-
-Bu modül model hesabı yapmaz ve odds kullanmaz.
-
-OCR sonucu doğrudan Q200 modeline gönderilmez.
+Önemli tasarım kararı:
+- OCR sonucu model katmanına doğrudan gitmez.
+- AVG / FOR / AGT değerleri ayrı tutulur.
+- Maç geçmişindeki sütunlar yanlışlıkla AVG/FOR/AGT yerine kullanılmaz.
+- Ham OCR metni DataReview.metadata içinde korunur.
 """
 
 from __future__ import annotations
@@ -38,17 +26,17 @@ from .data_review import DataReview, create_review
 STATSHUB_OCR_VERSION = "Q200-STATSHUB-OCR-V1"
 
 
-# StatsHub ekran görüntüsündeki gerçek satır adlarını
-# canonical alanlara bağlarız.
 STAT_LABELS: dict[str, str] = {
     "goals": "goals",
     "corners": "corners",
+    "comers": "corners",
     "cards": "cards",
     "crosses": "crosses",
     "big chance created": "big_chance_created",
     "big chance missed": "big_chance_missed",
     "big chance scored": "big_chance_scored",
     "expected goals (xg)": "xg",
+    "expected goals xg": "xg",
     "expected goals": "xg",
     "shots on target": "shots_on_target",
     "shots in the box": "shots_in_box",
@@ -77,103 +65,56 @@ STAT_LABELS: dict[str, str] = {
 }
 
 
-_OCR_REPLACEMENTS = str.maketrans(
-    {
-        "×": "x",
-        "—": "-",
-        "–": "-",
-        "“": '"',
-        "”": '"',
-        "’": "'",
-    }
-)
-
-
 _NUMBER_RE = re.compile(
     r"(?<!\d)(\d+(?:[.,]\d+)?%?)(?!\d)"
 )
 
 
-class StatsHubOCRError(RuntimeError):
-    """StatsHub OCR işlem hatası."""
-
-
 def normalize_ocr_text(text: str) -> str:
-    """OCR metnini parser için normalize eder."""
+    """OCR metnini satır bazında normalize eder."""
 
     if not isinstance(text, str):
         raise TypeError(
             "OCR text string olmalıdır."
         )
 
-    text = text.translate(
-        _OCR_REPLACEMENTS
-    )
-
     text = (
-        text
-        .replace("\r\n", "\n")
+        text.replace("\r\n", "\n")
         .replace("\r", "\n")
+        .replace("–", "-")
+        .replace("—", "-")
+        .replace("×", "x")
     )
 
-    lines = []
-
-    for line in text.split("\n"):
-
-        cleaned = " ".join(
-            line.split()
-        )
-
-        if cleaned:
-            lines.append(cleaned)
-
-    return "\n".join(lines)
+    return "\n".join(
+        " ".join(line.split())
+        for line in text.split("\n")
+        if line.strip()
+    )
 
 
-def _normalize_label(
-    label: str,
-) -> str:
-
+def _normalize_label(label: str) -> str:
     label = label.strip().lower()
-
-    label = re.sub(
-        r"\s+",
-        " ",
-        label,
-    )
-
-    label = label.replace(
-        "opp.",
-        "opp box",
-    )
-
-    label = label.replace(
-        "opp box box",
-        "opp box",
-    )
-
+    label = re.sub(r"\s+", " ", label)
+    label = label.replace("opp.", "opp box")
+    label = label.replace("opp box box", "opp box")
     return label
 
 
 def canonical_stat_name(
     label: str,
 ) -> str | None:
-    """StatsHub satır adını canonical alan adına çevirir."""
+    """StatsHub satır adını canonical alana çevirir."""
 
-    normalized = _normalize_label(
-        label
+    return STAT_LABELS.get(
+        _normalize_label(label)
     )
-
-    if normalized in STAT_LABELS:
-        return STAT_LABELS[normalized]
-
-    return None
 
 
 def parse_number(
     value: str,
 ) -> float:
-    """OCR sayı değerini float'a çevirir."""
+    """OCR sayı metnini sonlu float değerine çevirir."""
 
     if not isinstance(value, str):
         raise TypeError(
@@ -192,13 +133,11 @@ def parse_number(
         number = float(cleaned)
 
     except ValueError as exc:
-
         raise ValueError(
             f"Geçersiz OCR sayı değeri: {value}"
         ) from exc
 
     if not math.isfinite(number):
-
         raise ValueError(
             f"OCR sayı değeri sonlu olmalıdır: {value}"
         )
@@ -209,7 +148,7 @@ def parse_number(
 def extract_numbers(
     text: str,
 ) -> list[float]:
-    """Bir OCR satırındaki sayıları sırayla döndürür."""
+    """Bir satırdaki sayıları soldan sağa çıkarır."""
 
     return [
         parse_number(
@@ -231,7 +170,7 @@ def _extract_label_and_numbers(
         return line.strip(), []
 
     label = line[
-        : matches[0].start()
+        :matches[0].start()
     ].strip()
 
     numbers = [
@@ -244,110 +183,29 @@ def _extract_label_and_numbers(
     return label, numbers
 
 
-def parse_statshub_text(
-    text: str,
-    *,
-    value_column: str = "avg",
-) -> dict[str, Any]:
-    """
-    OCR'dan elde edilmiş satır bazlı StatsHub metnini parse eder.
-
-    StatsHub tablosunda tipik yapı:
-
-        Goals  3.05  1.70  1.35
-        Corners 9.15 4.30 4.85
-
-    Varsayılan olarak ilk sayı (AVG) alınır.
-
-    value_column seçenekleri:
-
-        avg
-        for
-        agt
-
-    Bu fonksiyon ilk üç tablo kolonunu yorumlar:
-
-        AVG
-        FOR
-        AGT
-
-    Maç geçmişindeki hücreler model girdisi olarak kullanılmaz.
-    """
-
-    if value_column not in {
-        "avg",
-        "for",
-        "agt",
-    }:
-        raise ValueError(
-            "value_column avg, for veya agt olmalıdır."
-        )
-
-    normalized_text = normalize_ocr_text(
-        text
-    )
-
-    result: dict[str, Any] = {}
-
-    index = {
-        "avg": 0,
-        "for": 1,
-        "agt": 2,
-    }[value_column]
-
-    for line in normalized_text.split("\n"):
-
-        label, numbers = (
-            _extract_label_and_numbers(
-                line
-            )
-        )
-
-        if not numbers:
-            continue
-
-        canonical = canonical_stat_name(
-            label
-        )
-
-        if canonical is None:
-            continue
-
-        if len(numbers) <= index:
-            continue
-
-        result[canonical] = numbers[index]
-
-    return result
-
-
 def parse_statshub_table_text(
     text: str,
 ) -> dict[str, dict[str, float]]:
     """
-    StatsHub metnindeki AVG/FOR/AGT değerlerini birlikte döndürür.
+    StatsHub OCR metnindeki özet tabloyu parse eder.
 
-    Örnek:
+    İlk üç özet sütun:
 
-        {
-            "goals": {
-                "avg": 3.05,
-                "for": 1.70,
-                "agt": 1.35
-            }
-        }
+        AVG | FOR | AGT
+
+    ayrı ayrı tutulur.
+
+    Sonraki maç geçmişi sütunları alınmaz.
     """
 
-    normalized_text = normalize_ocr_text(
-        text
-    )
+    normalized = normalize_ocr_text(text)
 
     result: dict[
         str,
         dict[str, float],
     ] = {}
 
-    for line in normalized_text.split("\n"):
+    for line in normalized.split("\n"):
 
         label, numbers = (
             _extract_label_and_numbers(
@@ -362,7 +220,7 @@ def parse_statshub_table_text(
         if canonical is None:
             continue
 
-        if len(numbers) < 1:
+        if not numbers:
             continue
 
         columns: dict[str, float] = {
@@ -380,33 +238,156 @@ def parse_statshub_table_text(
     return result
 
 
+def flatten_statshub_summary(
+    table: Mapping[
+        str,
+        Mapping[str, float],
+    ],
+    *,
+    include_columns: tuple[str, ...] = (
+        "avg",
+        "for",
+        "agt",
+    ),
+) -> dict[str, float]:
+    """
+    AVG/FOR/AGT tablosunu DataReview için düz dictionary'ye çevirir.
+
+    Örnek:
+
+        goals_avg
+        goals_for
+        goals_agt
+
+    Böylece aynı istatistiğin farklı sütunları karışmaz.
+    """
+
+    allowed = {
+        "avg",
+        "for",
+        "agt",
+    }
+
+    for column in include_columns:
+
+        if column not in allowed:
+            raise ValueError(
+                "include_columns yalnızca "
+                "avg, for, agt içerebilir."
+            )
+
+    result: dict[str, float] = {}
+
+    for field_name, values in table.items():
+
+        for column in include_columns:
+
+            if column in values:
+
+                result[
+                    f"{field_name}_{column}"
+                ] = float(
+                    values[column]
+                )
+
+    return result
+
+
+def parse_statshub_text(
+    text: str,
+    *,
+    value_column: str = "avg",
+) -> dict[str, float]:
+    """Tek bir özet sütununu canonical dictionary olarak döndürür."""
+
+    if value_column not in {
+        "avg",
+        "for",
+        "agt",
+    }:
+        raise ValueError(
+            "value_column avg, for veya agt olmalıdır."
+        )
+
+    table = parse_statshub_table_text(
+        text
+    )
+
+    return {
+        field_name: values[value_column]
+        for field_name, values in table.items()
+        if value_column in values
+    }
+
+
+def _preprocess_image(
+    image: Any,
+) -> Any:
+    """
+    OCR öncesi StatsHub mobil ekran görüntüsü için
+    hafif görüntü iyileştirmesi yapar.
+    """
+
+    from PIL import ImageEnhance
+    from PIL import ImageOps
+
+    gray = ImageOps.grayscale(
+        image
+    )
+
+    width, height = gray.size
+
+    gray = gray.resize(
+        (
+            width * 2,
+            height * 2,
+        )
+    )
+
+    gray = ImageOps.autocontrast(
+        gray
+    )
+
+    gray = ImageEnhance.Contrast(
+        gray
+    ).enhance(2.5)
+
+    return gray
+
+
 def ocr_image_to_text(
     image_path: str | Path,
     *,
-    ocr_engine: Callable[[Any], str] | None = None,
+    ocr_engine: Callable[
+        [Any],
+        str,
+    ] | None = None,
 ) -> str:
     """
     Görüntüyü OCR ile metne çevirir.
 
-    Test ve alternatif OCR motorları için
-    ocr_engine inject edilebilir.
+    Test/alternatif OCR motoru için
+    ocr_engine dışarıdan verilebilir.
 
-    Varsayılan motor pytesseract'tır.
+    Varsayılan:
 
-    Tesseract sistemde kurulu değilse açık
-    bir hata döndürür.
+        Pillow
+        +
+        pytesseract
+        +
+        Tesseract
     """
 
-    path = Path(image_path)
+    path = Path(
+        image_path
+    )
 
     if not path.exists():
-
         raise FileNotFoundError(
             f"StatsHub görüntüsü bulunamadı: {path}"
         )
 
     if not path.is_file():
-
         raise ValueError(
             f"StatsHub görüntü yolu dosya olmalıdır: {path}"
         )
@@ -417,16 +398,20 @@ def ocr_image_to_text(
 
     except ImportError as exc:
 
-        raise StatsHubOCRError(
-            "OCR için Pillow gereklidir."
+        raise RuntimeError(
+            "StatsHub OCR için Pillow gereklidir."
         ) from exc
 
-    image = Image.open(path)
+    image = Image.open(
+        path
+    )
 
     try:
 
         if ocr_engine is not None:
-            return ocr_engine(image)
+            return ocr_engine(
+                image
+            )
 
         try:
 
@@ -434,23 +419,32 @@ def ocr_image_to_text(
 
         except ImportError as exc:
 
-            raise StatsHubOCRError(
-                "OCR için pytesseract gereklidir."
+            raise RuntimeError(
+                "StatsHub OCR için pytesseract gereklidir."
             ) from exc
+
+        processed = _preprocess_image(
+            image
+        )
 
         try:
 
             return pytesseract.image_to_string(
-                image
+                processed,
+                config="--psm 4",
             )
 
         except Exception as exc:
 
-            raise StatsHubOCRError(
+            raise RuntimeError(
                 "Tesseract OCR çalıştırılamadı. "
-                "Tesseract kurulumu ve PATH ayarını "
+                "Tesseract kurulumu/PATH ayarını "
                 "kontrol edin."
             ) from exc
+
+        finally:
+
+            processed.close()
 
     finally:
 
@@ -461,30 +455,47 @@ def create_statshub_review(
     image_path: str | Path,
     *,
     review_id: str | None = None,
-    value_column: str = "avg",
-    confidence: Mapping[str, float] | None = None,
-    metadata: Mapping[str, Any] | None = None,
+    confidence: Mapping[
+        str,
+        float,
+    ] | None = None,
+    metadata: Mapping[
+        str,
+        Any,
+    ] | None = None,
     ocr_text: str | None = None,
-    ocr_engine: Callable[[Any], str] | None = None,
+    ocr_engine: Callable[
+        [Any],
+        str,
+    ] | None = None,
+    include_columns: tuple[
+        str,
+        ...,
+    ] = (
+        "avg",
+        "for",
+        "agt",
+    ),
 ) -> DataReview:
     """
-    StatsHub görüntüsünü:
+    StatsHub:
 
+        IMAGE
+          ↓
         OCR
-        ↓
-        Parser
-        ↓
-        DataReview
+          ↓
+        PARSER
+          ↓
+        DATA REVIEW
 
-    akışına bağlar.
+    akışını oluşturur.
 
-    OCR sonucu doğrudan modele gönderilmez.
-
-    Oluşturulan review başlangıçta
-    APPROVED değildir.
+    Review başlangıçta onaysızdır.
     """
 
-    path = Path(image_path)
+    path = Path(
+        image_path
+    )
 
     if ocr_text is None:
 
@@ -493,14 +504,18 @@ def create_statshub_review(
             ocr_engine=ocr_engine,
         )
 
-    values = parse_statshub_text(
-        ocr_text,
-        value_column=value_column,
+    table = parse_statshub_table_text(
+        ocr_text
+    )
+
+    values = flatten_statshub_summary(
+        table,
+        include_columns=include_columns,
     )
 
     if not values:
 
-        raise StatsHubOCRError(
+        raise RuntimeError(
             "StatsHub OCR sonucunda tanınan "
             "statistics alanı bulunamadı."
         )
@@ -517,11 +532,16 @@ def create_statshub_review(
 
     review_metadata.update(
         {
-            "ocr_version": STATSHUB_OCR_VERSION,
-            "value_column": value_column,
-            "ocr_text": normalize_ocr_text(
-                ocr_text
-            ),
+            "ocr_version":
+                STATSHUB_OCR_VERSION,
+            "ocr_text":
+                normalize_ocr_text(
+                    ocr_text
+                ),
+            "columns":
+                list(include_columns),
+            "parsed_table":
+                table,
         }
     )
 
