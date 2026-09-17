@@ -46,10 +46,19 @@ from .pipeline import (
 
 from .file_pipeline import (
     run_pipeline_from_files,
+    run_pipeline_from_reviews,
 )
 
 from .analyzer import (
     run_q200_from_files,
+)
+
+from .statistics_reader import (
+    read_statistics_review,
+)
+
+from .statistics_loader import (
+    load_team_stats_from_reviews,
 )
 
 from .report import (
@@ -147,8 +156,12 @@ __all__ = [
     "Q200Pipeline",
 
     "run_pipeline_from_files",
+    "run_pipeline_from_reviews",
 
     "run_q200_from_files",
+
+    "read_statistics_review",
+    "load_team_stats_from_reviews",
 
     "REPORT_VERSION",
     "build_report",
