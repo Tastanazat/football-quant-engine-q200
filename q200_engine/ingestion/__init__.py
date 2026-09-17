@@ -40,6 +40,16 @@ from .source_mapper import (
     map_sources,
 )
 
+from .data_validator import (
+    DATA_VALIDATOR_VERSION,
+    DEFAULT_REQUIRED_FIELDS,
+    ValidationIssue,
+    ValidationReport,
+    validate_canonical_values,
+    validate_canonical_data,
+    validation_to_dict,
+)
+
 
 __all__ = [
     "INGESTION_VERSION",
@@ -63,4 +73,11 @@ __all__ = [
     "SOURCE_MAPPER_VERSION",
     "map_soccerstats",
     "map_sources",
+    "DATA_VALIDATOR_VERSION",
+    "DEFAULT_REQUIRED_FIELDS",
+    "ValidationIssue",
+    "ValidationReport",
+    "validate_canonical_values",
+    "validate_canonical_data",
+    "validation_to_dict",
 ]
