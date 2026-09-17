@@ -3,92 +3,91 @@ Q200 Engine - Feature Selection
 
 Q200 V3.1
 
-Feature Quality çıktısını kullanarak model öncesi feature
-seçim/inceleme raporu oluşturur.
+Feature Engine
+      ↓
+Feature Quality
+      ↓
+Feature Selection
+      ↓
+MODEL'E GİRECEK FEATURELER
 
-Bu katman:
-- Model hesabı yapmaz.
-- Lambda hesabı yapmaz.
-- Odds kullanmaz.
-- Selection/stake değiştirmez.
-- Feature silmez.
-- Yalnızca feature'ları kalite kriterlerine göre sınıflandırır.
-- Her sınıflandırma için neden üretir.
+Bu katman feature'ları otomatik olarak silmez.
 
-Karar seviyeleri:
-
-KEEP
-    Feature mevcut durumda kullanılabilir görünüyor.
-
-FLAG
-    Feature kullanılabilir olabilir ancak veri kalitesi nedeniyle
-    ayrıca incelenmelidir.
-
-REDUNDANT
-    Feature başka bir feature ile yüksek korelasyon gösteriyor.
-    Otomatik olarak silinmez.
-
-EXCLUDE
-    Feature mevcut haliyle model adayı olmamalıdır.
+Amaç:
+- eksikliği yüksek feature'ları işaretlemek
+- sabit feature'ları işaretlemek
+- yüksek korelasyonlu feature çiftlerini işaretlemek
+- seçim gerekçelerini kayıt altına almak
+- model katmanına hangi feature'ların gönderileceğini
+  açık ve denetlenebilir hale getirmek
 
 ÖNEMLİ:
-Bu rapor yalnızca karar desteğidir. Q200 modelinin hangi
-feature'ları kullanacağına henüz müdahale etmez.
+- Model hesabı yapmaz.
+- Lambda hesaplamaz.
+- Odds kullanmaz.
+- Selection / Kelly hesabı yapmaz.
+- Mevcut Q200 V3.1 modelini değiştirmez.
+- Feature'ları sessizce silmez.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Mapping
+from dataclasses import asdict, dataclass
+from typing import Any, Iterable, Mapping
+
+from .feature_quality import (
+    DEFAULT_CORRELATION_THRESHOLD,
+    FeatureQualityReport,
+)
 
 
 FEATURE_SELECTION_VERSION = "Q200-FEATURE-SELECTION-V1"
 
-DEFAULT_MAX_MISSING_RATE = 0.50
-DEFAULT_REDUNDANCY_CORRELATION = 0.85
-
-
-DECISIONS = frozenset(
-    {
-        "KEEP",
-        "FLAG",
-        "REDUNDANT",
-        "EXCLUDE",
-    }
-)
+DEFAULT_MISSINGNESS_THRESHOLD = 0.50
 
 
 @dataclass(frozen=True)
 class FeatureSelectionDecision:
     """
     Tek bir feature için seçim kararı.
+
+    action:
+        KEEP
+        REVIEW
+        EXCLUDE
+
+    Q200 şu aşamada otomatik EXCLUDE uygulamaz.
+    EXCLUDE yalnızca açıkça verilen manuel seçimlerde kullanılabilir.
     """
 
     feature_name: str
-    decision: str
-    reasons: tuple[str, ...]
-    completeness: float
-    missing_rate: float
-    observation_count: int
-    valid_count: int
-    constant: bool
+    action: str
+    reasons: tuple[str, ...] = ()
+    completeness: float = 0.0
+    missing_count: int = 0
+    observation_count: int = 0
+    constant: bool = False
 
 
 @dataclass(frozen=True)
 class FeatureSelectionReport:
     """
-    Feature Selection raporu.
+    Feature selection raporu.
 
-    Bu nesne salt-okunurdur ve model davranışını değiştirmez.
+    Bu rapor model parametrelerini değiştirmez.
+    Yalnızca feature seçiminin gerekçesini kayıt altına alır.
     """
 
     version: str
     observation_count: int
     feature_count: int
-    max_missing_rate: float
-    redundancy_correlation: float
+    selected_features: tuple[str, ...]
+    review_features: tuple[str, ...]
+    excluded_features: tuple[str, ...]
     decisions: tuple[FeatureSelectionDecision, ...]
     redundant_pairs: tuple[tuple[str, str], ...]
+    missingness_threshold: float
+    correlation_threshold: float
 
 
 def _validate_threshold(
@@ -98,721 +97,287 @@ def _validate_threshold(
     minimum: float = 0.0,
     maximum: float = 1.0,
 ) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise TypeError(f"{name} sayısal olmalıdır.")
+    """
+    Threshold değerini doğrular.
+    """
 
-    value = float(value)
+    if isinstance(value, bool):
+        raise TypeError(f"{name} sayı olmalıdır.")
 
-    if value < minimum or value > maximum:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{name} sayı olmalıdır.") from exc
+
+    if numeric < minimum or numeric > maximum:
         raise ValueError(
             f"{name} {minimum} ile {maximum} arasında olmalıdır."
         )
 
-    return value
+    return numeric
 
 
-def _validate_non_negative_int(
-    value: int,
-    *,
-    name: str,
-) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(f"{name} integer olmalıdır.")
+def _validate_quality_report(
+    report: FeatureQualityReport,
+) -> FeatureQualityReport:
+    if not isinstance(report, FeatureQualityReport):
+        raise TypeError(
+            "report FeatureQualityReport olmalıdır."
+        )
 
-    if value < 0:
-        raise ValueError(f"{name} negatif olamaz.")
-
-    return value
+    return report
 
 
-def _read_quality_value(
+def _quality_reason(
     quality: Any,
-    name: str,
-    default: Any = None,
-) -> Any:
-    """
-    Dataclass veya mapping tabanlı FeatureQuality nesnelerini destekler.
-    """
-
-    if isinstance(quality, Mapping):
-        return quality.get(name, default)
-
-    return getattr(quality, name, default)
-
-
-def _missing_rate(quality: Any) -> float:
-    completeness = _read_quality_value(
-        quality,
-        "completeness",
-    )
-
-    if completeness is not None:
-        completeness = float(completeness)
-
-        return max(
-            0.0,
-            min(
-                1.0,
-                1.0 - completeness,
-            ),
-        )
-
-    observation_count = _read_quality_value(
-        quality,
-        "observation_count",
-        0,
-    )
-
-    missing_count = _read_quality_value(
-        quality,
-        "missing_count",
-        0,
-    )
-
-    observation_count = _validate_non_negative_int(
-        int(observation_count),
-        name="observation_count",
-    )
-
-    missing_count = _validate_non_negative_int(
-        int(missing_count),
-        name="missing_count",
-    )
-
-    if observation_count == 0:
-        return 1.0
-
-    return min(
-        1.0,
-        max(
-            0.0,
-            missing_count / observation_count,
-        ),
-    )
-
-
-def _feature_name(quality: Any) -> str:
-    name = _read_quality_value(
-        quality,
-        "feature_name",
-    )
-
-    if name is None:
-        name = _read_quality_value(
-            quality,
-            "name",
-        )
-
-    if name is None:
-        raise ValueError(
-            "Feature kalite kaydında feature_name bulunamadı."
-        )
-
-    name = str(name).strip()
-
-    if not name:
-        raise ValueError("Feature adı boş olamaz.")
-
-    return name
-
-
-def _observation_count(quality: Any) -> int:
-    value = _read_quality_value(
-        quality,
-        "observation_count",
-        0,
-    )
-
-    return _validate_non_negative_int(
-        int(value),
-        name="observation_count",
-    )
-
-
-def _valid_count(quality: Any) -> int:
-    value = _read_quality_value(
-        quality,
-        "valid_count",
-        0,
-    )
-
-    return _validate_non_negative_int(
-        int(value),
-        name="valid_count",
-    )
-
-
-def _constant(quality: Any) -> bool:
-    return bool(
-        _read_quality_value(
-            quality,
-            "constant",
-            False,
-        )
-    )
-
-
-def _validate_decision(
-    decision: str,
-) -> str:
-    decision = str(decision).upper().strip()
-
-    if decision not in DECISIONS:
-        raise ValueError(
-            f"Geçersiz feature selection kararı: {decision}"
-        )
-
-    return decision
-
-
-def discover_selection_candidates(
-    quality_report: Any,
-) -> list[Any]:
-    """
-    FeatureQualityReport içindeki feature kalite kayıtlarını alır.
-
-    Hem dataclass hem mapping tabanlı raporları destekler.
-    """
-
-    if isinstance(quality_report, Mapping):
-        features = quality_report.get(
-            "features",
-            (),
-        )
-    else:
-        features = getattr(
-            quality_report,
-            "features",
-            (),
-        )
-
-    if features is None:
-        return []
-
-    return list(features)
-
-
-def select_features(
-    quality_report: Any,
     *,
-    max_missing_rate: float = DEFAULT_MAX_MISSING_RATE,
-    redundancy_correlation: float = DEFAULT_REDUNDANCY_CORRELATION,
+    missingness_threshold: float,
+) -> list[str]:
+    """
+    Feature Quality çıktısından seçim gerekçelerini üretir.
+    """
+
+    reasons: list[str] = []
+
+    if quality.observation_count <= 0:
+        reasons.append("NO_OBSERVATIONS")
+        return reasons
+
+    if quality.completeness < (1.0 - missingness_threshold):
+        reasons.append("HIGH_MISSINGNESS")
+
+    if quality.constant:
+        reasons.append("CONSTANT_FEATURE")
+
+    if quality.valid_count <= 0:
+        reasons.append("NO_VALID_VALUES")
+
+    return reasons
+
+
+def _redundant_feature_names(
+    redundant_pairs: Iterable[Any],
+) -> set[str]:
+    """
+    Feature Quality redundant pair listesinden feature isimlerini çıkarır.
+    """
+
+    names: set[str] = set()
+
+    for pair in redundant_pairs:
+        feature_a = getattr(pair, "feature_a", None)
+        feature_b = getattr(pair, "feature_b", None)
+
+        if isinstance(feature_a, str):
+            names.add(feature_a)
+
+        if isinstance(feature_b, str):
+            names.add(feature_b)
+
+    return names
+
+
+def build_feature_selection(
+    report: FeatureQualityReport,
+    *,
+    missingness_threshold: float = DEFAULT_MISSINGNESS_THRESHOLD,
+    correlation_threshold: float = DEFAULT_CORRELATION_THRESHOLD,
 ) -> FeatureSelectionReport:
     """
     Feature Quality raporundan Feature Selection raporu üretir.
 
-    Hiçbir feature fiziksel olarak silinmez.
+    Kurallar:
 
-    Karar mantığı:
+    1. Feature'ın gözlemi yoksa REVIEW.
+    2. Feature'ın geçerli değeri yoksa REVIEW.
+    3. Missingness threshold aşılırsa REVIEW.
+    4. Constant feature REVIEW.
+    5. Yüksek korelasyonlu feature'lar REVIEW.
+    6. Hiçbir problem yoksa KEEP.
 
-    1. Çok yüksek eksiklik:
-       EXCLUDE
-
-    2. Constant feature:
-       FLAG
-
-    3. Orta/yüksek eksiklik:
-       FLAG
-
-    4. Diğerleri:
-       KEEP
-
-    Korelasyon nedeniyle REDUNDANT kararı ayrıca
-    redundant_pairs üzerinden raporlanır.
+    Otomatik EXCLUDE yapılmaz.
     """
 
-    max_missing_rate = _validate_threshold(
-        max_missing_rate,
-        name="max_missing_rate",
+    report = _validate_quality_report(report)
+
+    missingness_threshold = _validate_threshold(
+        missingness_threshold,
+        name="missingness_threshold",
     )
 
-    redundancy_correlation = _validate_threshold(
-        redundancy_correlation,
-        name="redundancy_correlation",
+    correlation_threshold = _validate_threshold(
+        correlation_threshold,
+        name="correlation_threshold",
     )
 
-    candidates = discover_selection_candidates(
-        quality_report
-    )
+    redundant_pairs = tuple(report.redundant_pairs)
 
-    observation_count = _read_quality_value(
-        quality_report,
-        "observation_count",
-        0,
-    )
-
-    observation_count = _validate_non_negative_int(
-        int(observation_count),
-        name="observation_count",
+    redundant_names = _redundant_feature_names(
+        redundant_pairs
     )
 
     decisions: list[FeatureSelectionDecision] = []
 
-    for quality in candidates:
-        name = _feature_name(quality)
+    for quality in report.features:
+        reasons = _quality_reason(
+            quality,
+            missingness_threshold=missingness_threshold,
+        )
 
-        observations = _observation_count(quality)
-        valid = _valid_count(quality)
-        constant = _constant(quality)
+        if quality.feature_name in redundant_names:
+            reasons.append("HIGH_CORRELATION")
 
-        missing_rate = _missing_rate(quality)
-        completeness = 1.0 - missing_rate
+        # Duplicate reason koruması.
+        reasons = list(dict.fromkeys(reasons))
 
-        reasons: list[str] = []
-
-        if observations == 0:
-            reasons.append("NO_OBSERVATIONS")
-
-        if valid == 0:
-            reasons.append("NO_VALID_VALUES")
-
-        if missing_rate > max_missing_rate:
-            reasons.append("HIGH_MISSING_RATE")
-
-        elif missing_rate > 0:
-            reasons.append("PARTIAL_MISSING_DATA")
-
-        if constant:
-            reasons.append("CONSTANT_FEATURE")
-
-        if (
-            missing_rate > max_missing_rate
-            or valid == 0
-        ):
-            decision = "EXCLUDE"
-
-        elif constant:
-            decision = "FLAG"
-
-        elif missing_rate > 0:
-            decision = "FLAG"
-
+        if reasons:
+            action = "REVIEW"
         else:
-            decision = "KEEP"
-
-        if not reasons:
-            reasons.append(
-                "DATA_QUALITY_ACCEPTABLE"
-            )
+            action = "KEEP"
 
         decisions.append(
             FeatureSelectionDecision(
-                feature_name=name,
-                decision=_validate_decision(
-                    decision
-                ),
+                feature_name=quality.feature_name,
+                action=action,
                 reasons=tuple(reasons),
-                completeness=completeness,
-                missing_rate=missing_rate,
-                observation_count=observations,
-                valid_count=valid,
-                constant=constant,
+                completeness=quality.completeness,
+                missing_count=quality.missing_count,
+                observation_count=quality.observation_count,
+                constant=quality.constant,
             )
         )
 
-    decisions.sort(
-        key=lambda item: item.feature_name
+    selected_features = tuple(
+        decision.feature_name
+        for decision in decisions
+        if decision.action == "KEEP"
     )
 
-    redundant_pairs = _extract_redundant_pairs(
-        quality_report,
-        threshold=redundancy_correlation,
+    review_features = tuple(
+        decision.feature_name
+        for decision in decisions
+        if decision.action == "REVIEW"
     )
 
-    redundant_names = {
-        name
-        for pair in redundant_pairs
-        for name in pair
-    }
-
-    updated_decisions: list[
-        FeatureSelectionDecision
-    ] = []
-
-    for decision in decisions:
-        if (
-            decision.feature_name in redundant_names
-            and decision.decision == "KEEP"
-        ):
-            reasons = tuple(
-                list(decision.reasons)
-                + [
-                    "HIGH_CORRELATION_REDUNDANCY"
-                ]
-            )
-
-            updated_decisions.append(
-                FeatureSelectionDecision(
-                    feature_name=decision.feature_name,
-                    decision="REDUNDANT",
-                    reasons=reasons,
-                    completeness=decision.completeness,
-                    missing_rate=decision.missing_rate,
-                    observation_count=decision.observation_count,
-                    valid_count=decision.valid_count,
-                    constant=decision.constant,
-                )
-            )
-
-        elif (
-            decision.feature_name in redundant_names
-            and decision.decision == "FLAG"
-        ):
-            reasons = tuple(
-                list(decision.reasons)
-                + [
-                    "HIGH_CORRELATION_REDUNDANCY"
-                ]
-            )
-
-            updated_decisions.append(
-                FeatureSelectionDecision(
-                    feature_name=decision.feature_name,
-                    decision="FLAG",
-                    reasons=reasons,
-                    completeness=decision.completeness,
-                    missing_rate=decision.missing_rate,
-                    observation_count=decision.observation_count,
-                    valid_count=decision.valid_count,
-                    constant=decision.constant,
-                )
-            )
-
-        else:
-            updated_decisions.append(
-                decision
-            )
+    excluded_features = tuple(
+        decision.feature_name
+        for decision in decisions
+        if decision.action == "EXCLUDE"
+    )
 
     return FeatureSelectionReport(
         version=FEATURE_SELECTION_VERSION,
-        observation_count=observation_count,
-        feature_count=len(updated_decisions),
-        max_missing_rate=max_missing_rate,
-        redundancy_correlation=redundancy_correlation,
-        decisions=tuple(updated_decisions),
+        observation_count=report.observation_count,
+        feature_count=report.feature_count,
+        selected_features=selected_features,
+        review_features=review_features,
+        excluded_features=excluded_features,
+        decisions=tuple(decisions),
         redundant_pairs=tuple(
-            redundant_pairs
-        ),
-    )
-
-
-def _extract_redundant_pairs(
-    quality_report: Any,
-    *,
-    threshold: float,
-) -> list[tuple[str, str]]:
-    """
-    FeatureQualityReport içindeki correlation bilgilerini okur.
-
-    Desteklenen yapılar:
-
-    correlations:
-        {
-            ("a", "b"): 0.91,
-            ...
-        }
-
-    veya:
-
-    correlations:
-        [
-            FeaturePair(...),
-            ...
-        ]
-
-    veya FeaturePair nesneleri.
-    """
-
-    if isinstance(quality_report, Mapping):
-        correlations = quality_report.get(
-            "correlations",
-            (),
-        )
-
-        existing_pairs = quality_report.get(
-            "redundant_pairs",
-            (),
-        )
-
-    else:
-        correlations = getattr(
-            quality_report,
-            "correlations",
-            (),
-        )
-
-        existing_pairs = getattr(
-            quality_report,
-            "redundant_pairs",
-            (),
-        )
-
-    pairs: set[tuple[str, str]] = set()
-
-    for item in existing_pairs or ():
-        pair = _parse_pair(item)
-
-        if pair is not None:
-            pairs.add(pair)
-
-    if isinstance(correlations, Mapping):
-        for key, value in correlations.items():
-            pair = _parse_pair_key(key)
-
-            if pair is None:
-                continue
-
-            try:
-                correlation = float(value)
-            except (
-                TypeError,
-                ValueError,
-            ):
-                continue
-
-            if abs(correlation) >= threshold:
-                pairs.add(pair)
-
-    else:
-        for item in correlations or ():
-            pair = _parse_pair(item)
-
-            if pair is None:
-                continue
-
-            correlation = _read_quality_value(
-                item,
-                "absolute_correlation",
+            (
+                pair.feature_a,
+                pair.feature_b,
             )
-
-            if correlation is None:
-                correlation = _read_quality_value(
-                    item,
-                    "correlation",
-                )
-
-                try:
-                    correlation = abs(
-                        float(correlation)
-                    )
-                except (
-                    TypeError,
-                    ValueError,
-                ):
-                    continue
-
-            try:
-                correlation = float(
-                    correlation
-                )
-            except (
-                TypeError,
-                ValueError,
-            ):
-                continue
-
-            if correlation >= threshold:
-                pairs.add(pair)
-
-    return sorted(pairs)
-
-
-def _parse_pair_key(
-    key: Any,
-) -> tuple[str, str] | None:
-    if not isinstance(
-        key,
-        (tuple, list),
-    ):
-        return None
-
-    if len(key) != 2:
-        return None
-
-    first = str(key[0]).strip()
-    second = str(key[1]).strip()
-
-    if (
-        not first
-        or not second
-        or first == second
-    ):
-        return None
-
-    return tuple(
-        sorted(
-            (first, second)
-        )
-    )
-
-
-def _parse_pair(
-    item: Any,
-) -> tuple[str, str] | None:
-    if isinstance(
-        item,
-        (tuple, list),
-    ):
-        return _parse_pair_key(item)
-
-    feature_a = _read_quality_value(
-        item,
-        "feature_a",
-    )
-
-    feature_b = _read_quality_value(
-        item,
-        "feature_b",
-    )
-
-    if (
-        feature_a is None
-        or feature_b is None
-    ):
-        return None
-
-    feature_a = str(feature_a).strip()
-    feature_b = str(feature_b).strip()
-
-    if (
-        not feature_a
-        or not feature_b
-        or feature_a == feature_b
-    ):
-        return None
-
-    return tuple(
-        sorted(
-            (feature_a, feature_b)
-        )
+            for pair in redundant_pairs
+        ),
+        missingness_threshold=missingness_threshold,
+        correlation_threshold=correlation_threshold,
     )
 
 
 def selected_feature_names(
-    report: FeatureSelectionReport,
-    *,
-    include_flagged: bool = False,
-    include_redundant: bool = False,
+    selection: FeatureSelectionReport,
 ) -> tuple[str, ...]:
     """
-    Selection raporundan kullanılabilecek feature isimlerini döndürür.
-
-    Varsayılan:
-        yalnızca KEEP.
-
-    Bu fonksiyon model.py'yi değiştirmez.
+    KEEP olarak işaretlenen feature isimlerini döndürür.
     """
 
-    if not isinstance(
-        report,
-        FeatureSelectionReport,
-    ):
+    if not isinstance(selection, FeatureSelectionReport):
         raise TypeError(
-            "report FeatureSelectionReport olmalıdır."
+            "selection FeatureSelectionReport olmalıdır."
         )
 
-    allowed = {"KEEP"}
+    return selection.selected_features
 
-    if include_flagged:
-        allowed.add("FLAG")
 
-    if include_redundant:
-        allowed.add("REDUNDANT")
+def review_feature_names(
+    selection: FeatureSelectionReport,
+) -> tuple[str, ...]:
+    """
+    REVIEW olarak işaretlenen feature isimlerini döndürür.
+    """
 
-    return tuple(
-        decision.feature_name
-        for decision in report.decisions
-        if decision.decision in allowed
-    )
+    if not isinstance(selection, FeatureSelectionReport):
+        raise TypeError(
+            "selection FeatureSelectionReport olmalıdır."
+        )
+
+    return selection.review_features
 
 
 def feature_selection_to_dict(
-    report: FeatureSelectionReport,
+    selection: FeatureSelectionReport,
 ) -> dict[str, Any]:
     """
-    FeatureSelectionReport'u JSON uyumlu dict'e dönüştürür.
+    Selection raporunu JSON uyumlu dictionary'ye çevirir.
     """
 
-    if not isinstance(
-        report,
-        FeatureSelectionReport,
-    ):
+    if not isinstance(selection, FeatureSelectionReport):
         raise TypeError(
-            "report FeatureSelectionReport olmalıdır."
+            "selection FeatureSelectionReport olmalıdır."
         )
+
+    return asdict(selection)
+
+
+def filter_feature_mapping(
+    values: Mapping[str, Any],
+    selection: FeatureSelectionReport,
+    *,
+    include_review: bool = False,
+) -> dict[str, Any]:
+    """
+    Feature mapping'i selection raporuna göre filtreler.
+
+    Varsayılan:
+        yalnızca KEEP feature'ları döndürür.
+
+    include_review=True:
+        KEEP + REVIEW feature'ları döndürür.
+
+    EXCLUDE feature'ları hiçbir durumda döndürülmez.
+    """
+
+    if not isinstance(values, Mapping):
+        raise TypeError(
+            "values mapping olmalıdır."
+        )
+
+    if not isinstance(selection, FeatureSelectionReport):
+        raise TypeError(
+            "selection FeatureSelectionReport olmalıdır."
+        )
+
+    allowed = set(selection.selected_features)
+
+    if include_review:
+        allowed.update(selection.review_features)
 
     return {
-        "version": report.version,
-        "observation_count": report.observation_count,
-        "feature_count": report.feature_count,
-        "max_missing_rate": report.max_missing_rate,
-        "redundancy_correlation": (
-            report.redundancy_correlation
-        ),
-        "decisions": [
-            {
-                "feature_name": decision.feature_name,
-                "decision": decision.decision,
-                "reasons": list(
-                    decision.reasons
-                ),
-                "completeness": decision.completeness,
-                "missing_rate": decision.missing_rate,
-                "observation_count": (
-                    decision.observation_count
-                ),
-                "valid_count": (
-                    decision.valid_count
-                ),
-                "constant": decision.constant,
-            }
-            for decision in report.decisions
-        ],
-        "redundant_pairs": [
-            list(pair)
-            for pair in report.redundant_pairs
-        ],
+        key: value
+        for key, value in values.items()
+        if key in allowed
     }
-
-
-def feature_selection_summary(
-    report: FeatureSelectionReport,
-) -> dict[str, int]:
-    """
-    Kararların özetini döndürür.
-    """
-
-    if not isinstance(
-        report,
-        FeatureSelectionReport,
-    ):
-        raise TypeError(
-            "report FeatureSelectionReport olmalıdır."
-        )
-
-    summary = {
-        "KEEP": 0,
-        "FLAG": 0,
-        "REDUNDANT": 0,
-        "EXCLUDE": 0,
-    }
-
-    for decision in report.decisions:
-        summary[decision.decision] += 1
-
-    return summary
 
 
 __all__ = [
     "FEATURE_SELECTION_VERSION",
-    "DEFAULT_MAX_MISSING_RATE",
-    "DEFAULT_REDUNDANCY_CORRELATION",
-    "DECISIONS",
+    "DEFAULT_MISSINGNESS_THRESHOLD",
     "FeatureSelectionDecision",
     "FeatureSelectionReport",
-    "discover_selection_candidates",
-    "select_features",
+    "build_feature_selection",
     "selected_feature_names",
+    "review_feature_names",
     "feature_selection_to_dict",
-    "feature_selection_summary",
+    "filter_feature_mapping",
 ]
