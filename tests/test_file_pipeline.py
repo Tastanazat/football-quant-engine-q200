@@ -1,3 +1,6 @@
+import pytest
+
+
 def test_run_pipeline_from_canonical_sources():
     from q200_engine.ingestion.models import (
         GoalStats,
