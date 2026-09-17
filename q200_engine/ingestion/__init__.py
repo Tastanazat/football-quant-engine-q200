@@ -50,20 +50,20 @@ from .data_validator import (
     validation_to_dict,
 )
 
-from .canonical_adapter import (
-    CANONICAL_ADAPTER_VERSION,
-    MODEL_REQUIRED_CANONICAL_FIELDS,
-    OPTIONAL_MODEL_FIELDS,
-    canonical_to_team_stats,
-    validated_canonical_to_team_stats,
-)
-
 from .validated_pipeline import (
     VALIDATED_INGESTION_VERSION,
     ValidatedCanonicalData,
     map_and_validate,
     require_valid,
     validated_pipeline_to_dict,
+)
+
+from .canonical_adapter import (
+    CANONICAL_ADAPTER_VERSION,
+    MODEL_REQUIRED_CANONICAL_FIELDS,
+    MODEL_FIELD_MAP,
+    canonical_to_team_stats,
+    validated_canonical_to_team_stats,
 )
 
 
@@ -100,15 +100,15 @@ __all__ = [
     "validate_canonical_data",
     "validation_to_dict",
 
-    "CANONICAL_ADAPTER_VERSION",
-    "MODEL_REQUIRED_CANONICAL_FIELDS",
-    "OPTIONAL_MODEL_FIELDS",
-    "canonical_to_team_stats",
-    "validated_canonical_to_team_stats",
-
     "VALIDATED_INGESTION_VERSION",
     "ValidatedCanonicalData",
     "map_and_validate",
     "require_valid",
     "validated_pipeline_to_dict",
+
+    "CANONICAL_ADAPTER_VERSION",
+    "MODEL_REQUIRED_CANONICAL_FIELDS",
+    "MODEL_FIELD_MAP",
+    "canonical_to_team_stats",
+    "validated_canonical_to_team_stats",
 ]
