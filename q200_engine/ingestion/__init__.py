@@ -34,6 +34,12 @@ from .soccerstats_parser import (
     parse_soccerstats_pdf,
 )
 
+from .source_mapper import (
+    SOURCE_MAPPER_VERSION,
+    map_soccerstats,
+    map_sources,
+)
+
 
 __all__ = [
     "INGESTION_VERSION",
@@ -54,4 +60,7 @@ __all__ = [
     "extract_pdf_text",
     "parse_soccerstats_text",
     "parse_soccerstats_pdf",
+    "SOURCE_MAPPER_VERSION",
+    "map_soccerstats",
+    "map_sources",
 ]
