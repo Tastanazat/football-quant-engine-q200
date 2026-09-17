@@ -50,6 +50,14 @@ from .data_validator import (
     validation_to_dict,
 )
 
+from .canonical_adapter import (
+    CANONICAL_ADAPTER_VERSION,
+    MODEL_REQUIRED_CANONICAL_FIELDS,
+    OPTIONAL_MODEL_FIELDS,
+    canonical_to_team_stats,
+    validated_canonical_to_team_stats,
+)
+
 from .validated_pipeline import (
     VALIDATED_INGESTION_VERSION,
     ValidatedCanonicalData,
@@ -74,13 +82,16 @@ __all__ = [
     "OddsData",
     "CanonicalMatchData",
     "model_to_dict",
+
     "SOCCERSTATS_PARSER_VERSION",
     "extract_pdf_text",
     "parse_soccerstats_text",
     "parse_soccerstats_pdf",
+
     "SOURCE_MAPPER_VERSION",
     "map_soccerstats",
     "map_sources",
+
     "DATA_VALIDATOR_VERSION",
     "DEFAULT_REQUIRED_FIELDS",
     "ValidationIssue",
@@ -88,6 +99,13 @@ __all__ = [
     "validate_canonical_values",
     "validate_canonical_data",
     "validation_to_dict",
+
+    "CANONICAL_ADAPTER_VERSION",
+    "MODEL_REQUIRED_CANONICAL_FIELDS",
+    "OPTIONAL_MODEL_FIELDS",
+    "canonical_to_team_stats",
+    "validated_canonical_to_team_stats",
+
     "VALIDATED_INGESTION_VERSION",
     "ValidatedCanonicalData",
     "map_and_validate",
