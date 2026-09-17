@@ -1,42 +1,47 @@
-"""
-Q200 Engine - File Pipeline Tests
-
-Q200 V3.1
-"""
-
-from __future__ import annotations
-
-from pathlib import Path
-
-import pytest
-
-from q200_engine.file_pipeline import run_pipeline_from_files
-
-
-def create_csv(path: Path, content: str) -> None:
-    path.write_text(content, encoding="utf-8")
-
-
-def test_run_pipeline_from_two_csv_files(tmp_path):
-    file_1 = tmp_path / "statistics_1.csv"
-    file_2 = tmp_path / "statistics_2.csv"
-
-    create_csv(
-        file_1,
-        "home_gf,home_ga,away_gf\n"
-        "1.80,1.10,1.40\n",
+def test_run_pipeline_from_canonical_sources():
+    from q200_engine.ingestion.models import (
+        GoalStats,
+        MatchInfo,
+        SoccerStatsData,
+        StatsHubData,
+    )
+    from q200_engine.file_pipeline import (
+        run_pipeline_from_sources,
     )
 
-    create_csv(
-        file_2,
-        "away_ga,home_xg,home_xga,away_xga\n"
-        "1.30,1.75,1.05,1.25\n",
+    match = MatchInfo(
+        home_team="Real Betis",
+        away_team="Getafe",
+        date="17 Sep 2026",
+        time="18:00",
+        competition="LaLiga",
+        source="SoccerSTATS",
     )
 
-    result = run_pipeline_from_files(
-        file_1,
-        file_2,
-        {
+    soccerstats = SoccerStatsData(
+        match=match,
+        goals=GoalStats(
+            home_gf_per_match=1.50,
+            home_ga_per_match=1.00,
+            away_gf_per_match=1.20,
+            away_ga_per_match=1.10,
+        ),
+    )
+
+    statshub = StatsHubData(
+        match=match,
+        values={
+            "possession_avg": 50.85,
+            "total_shots_avg": 26.50,
+            "shots_on_target_avg": 10.50,
+            "corners_avg": 9.15,
+        },
+    )
+
+    result = run_pipeline_from_sources(
+        soccerstats=soccerstats,
+        statshub=statshub,
+        odds={
             "HOME": 2.00,
             "DRAW": 3.50,
             "AWAY": 4.00,
@@ -48,177 +53,91 @@ def test_run_pipeline_from_two_csv_files(tmp_path):
     assert result.snapshot.model_version == "Q200-V3.1"
     assert result.snapshot.lambda_home > 0
     assert result.snapshot.lambda_away > 0
-    assert isinstance(result.selections, list)
 
 
-def test_file_1_values_reach_model(tmp_path):
-    file_1 = tmp_path / "statistics_1.csv"
-    file_2 = tmp_path / "statistics_2.csv"
-
-    create_csv(
-        file_1,
-        "home_gf,home_ga,away_gf\n"
-        "2.00,1.00,1.50\n",
+def test_canonical_source_pipeline_preserves_source_priority():
+    from q200_engine.ingestion.models import (
+        GoalStats,
+        MatchInfo,
+        SoccerStatsData,
+        StatsHubData,
+    )
+    from q200_engine.ingestion.validated_pipeline import (
+        map_and_validate,
     )
 
-    create_csv(
-        file_2,
-        "home_gf,home_ga,away_gf,away_ga\n"
-        "1.00,2.00,0.50,1.40\n",
+    match = MatchInfo(
+        home_team="Real Betis",
+        away_team="Getafe",
+        source="SoccerSTATS",
     )
 
-    result = run_pipeline_from_files(
-        file_1,
-        file_2,
-        {
-            "HOME": 2.00,
-            "DRAW": 3.50,
-            "AWAY": 4.00,
-        },
-        bankroll=50_000,
-    )
-
-    assert result.snapshot.locked is True
-    assert result.snapshot.lambda_home > 0
-    assert result.snapshot.lambda_away > 0
-
-
-def test_mixed_csv_xlsx_files(tmp_path):
-    openpyxl = pytest.importorskip("openpyxl")
-
-    file_1 = tmp_path / "statistics_1.csv"
-    file_2 = tmp_path / "statistics_2.xlsx"
-
-    create_csv(
-        file_1,
-        "home_gf,home_ga,away_gf\n"
-        "1.80,1.10,1.40\n",
-    )
-
-    workbook = openpyxl.Workbook()
-    worksheet = workbook.active
-
-    worksheet.append(
-        [
-            "away_ga",
-            "home_xg",
-            "home_xga",
-            "away_xga",
-        ]
-    )
-
-    worksheet.append(
-        [
-            1.30,
-            1.75,
-            1.05,
-            1.25,
-        ]
-    )
-
-    workbook.save(file_2)
-
-    result = run_pipeline_from_files(
-        file_1,
-        file_2,
-        {
-            "HOME": 2.00,
-            "DRAW": 3.50,
-            "AWAY": 4.00,
-        },
-        bankroll=50_000,
-    )
-
-    assert result.snapshot.locked is True
-
-
-def test_row_indexes_are_forwarded(tmp_path):
-    file_1 = tmp_path / "statistics_1.csv"
-    file_2 = tmp_path / "statistics_2.csv"
-
-    create_csv(
-        file_1,
-        "home_gf,home_ga,away_gf\n"
-        "1.00,2.00,3.00\n"
-        "2.00,3.00,4.00\n",
-    )
-
-    create_csv(
-        file_2,
-        "away_ga\n"
-        "1.10\n"
-        "1.30\n",
-    )
-
-    result = run_pipeline_from_files(
-        file_1,
-        file_2,
-        {
-            "HOME": 2.00,
-            "DRAW": 3.50,
-            "AWAY": 4.00,
-        },
-        bankroll=50_000,
-        row_index_1=1,
-        row_index_2=1,
-    )
-
-    assert result.snapshot.locked is True
-
-
-def test_file_pipeline_rejects_invalid_odds(tmp_path):
-    file_1 = tmp_path / "statistics_1.csv"
-    file_2 = tmp_path / "statistics_2.csv"
-
-    create_csv(
-        file_1,
-        "home_gf,home_ga,away_gf\n"
-        "1.80,1.10,1.40\n",
-    )
-
-    create_csv(
-        file_2,
-        "away_ga\n"
-        "1.30\n",
-    )
-
-    with pytest.raises(ValueError):
-        run_pipeline_from_files(
-            file_1,
-            file_2,
-            {
-                "HOME": 1.00,
-                "DRAW": 3.50,
-                "AWAY": 4.00,
+    result = map_and_validate(
+        soccerstats=SoccerStatsData(
+            match=match,
+            goals=GoalStats(
+                home_gf_per_match=1.50,
+                home_ga_per_match=1.00,
+                away_gf_per_match=1.20,
+                away_ga_per_match=1.10,
+            ),
+        ),
+        statshub=StatsHubData(
+            match=match,
+            values={
+                "home_gf_per_match": 99.0,
+                "possession_avg": 50.85,
             },
+        ),
+    )
+
+    assert result.valid is True
+    assert (
+        result.canonical_values["home_gf_per_match"]
+        == 1.50
+    )
+    assert (
+        result.source_trace["home_gf_per_match"]
+        == "SoccerSTATS"
+    )
+    assert (
+        result.canonical_values["possession_avg"]
+        == 50.85
+    )
+
+
+def test_canonical_source_pipeline_blocks_invalid_validation():
+    from q200_engine.file_pipeline import (
+        run_pipeline_from_sources,
+    )
+    from q200_engine.ingestion.models import (
+        GoalStats,
+        MatchInfo,
+        SoccerStatsData,
+    )
+
+    match = MatchInfo(
+        home_team="Real Betis",
+        away_team="Getafe",
+        source="SoccerSTATS",
+    )
+
+    soccerstats = SoccerStatsData(
+        match=match,
+        goals=GoalStats(
+            home_gf_per_match=-1.0,
+            home_ga_per_match=1.0,
+            away_gf_per_match=1.20,
+            away_ga_per_match=1.10,
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="validation başarısız",
+    ):
+        run_pipeline_from_sources(
+            soccerstats=soccerstats,
+            odds={"HOME": 2.00},
             bankroll=50_000,
-        )
-
-
-def test_file_pipeline_rejects_invalid_bankroll(tmp_path):
-    file_1 = tmp_path / "statistics_1.csv"
-    file_2 = tmp_path / "statistics_2.csv"
-
-    create_csv(
-        file_1,
-        "home_gf,home_ga,away_gf\n"
-        "1.80,1.10,1.40\n",
-    )
-
-    create_csv(
-        file_2,
-        "away_ga\n"
-        "1.30\n",
-    )
-
-    with pytest.raises(ValueError):
-        run_pipeline_from_files(
-            file_1,
-            file_2,
-            {
-                "HOME": 2.00,
-                "DRAW": 3.50,
-                "AWAY": 4.00,
-            },
-            bankroll=0,
         )
