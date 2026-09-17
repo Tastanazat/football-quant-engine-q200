@@ -58,7 +58,10 @@ def _clean_text(text: str) -> str:
     )
 
 
-def _line(text: str, marker: str) -> str | None:
+def _line(
+    text: str,
+    marker: str,
+) -> str | None:
     for value in text.splitlines():
         if marker.lower() in value.lower():
             return value.strip()
@@ -92,7 +95,6 @@ def _percent_after(
 def _extract_team_names(
     text: str,
 ) -> tuple[str, str]:
-
     match = re.search(
         r"^([^\n]+?)\s+vs\s+([^\n]+?)\s*$",
         text,
@@ -105,16 +107,21 @@ def _extract_team_names(
             "'Home vs Away' maç başlığı bulunamadı."
         )
 
-    return (
-        match.group(1).strip(),
-        match.group(2).strip(),
-    )
+    home = match.group(1).strip()
+    away = match.group(2).strip()
+
+    if not home or not away:
+        raise ValueError(
+            "SoccerSTATS maç başlığında "
+            "Home/Away takım adı bulunamadı."
+        )
+
+    return home, away
 
 
 def _extract_match_info(
     text: str,
 ) -> MatchInfo:
-
     home, away = _extract_team_names(text)
 
     competition_match = re.search(
@@ -161,7 +168,6 @@ def _extract_match_info(
 def _extract_goal_stats(
     text: str,
 ) -> GoalStats:
-
     gf_line = _line(
         text,
         "Goals scored (GF)",
@@ -229,35 +235,35 @@ def _extract_goal_stats(
             else None
         ),
         home_scoring_rate=_percent_after(
-            r"\(A\).*?scoring rate at home",
+            r"A.*?scoring rate at home",
             text,
         ),
         away_scoring_rate=_percent_after(
-            r"\(B\).*?scoring rate away",
+            r"B.*?scoring rate away",
             text,
         ),
         home_conceding_rate=_percent_after(
-            r"\(A\).*?conceding rate at home",
+            r"A.*?conceding rate at home",
             text,
         ),
         away_conceding_rate=_percent_after(
-            r"\(B\).*?conceding rate away",
+            r"B.*?conceding rate away",
             text,
         ),
         over_1_5=_percent_after(
-            r"\(A\).*?over 1\.5 at home",
+            r"A.*?over 1\.5 at home",
             text,
         ),
         over_2_5=_percent_after(
-            r"\(A\).*?over 2\.5 at home",
+            r"A.*?over 2\.5 at home",
             text,
         ),
         over_3_5=_percent_after(
-            r"\(A\).*?over 3\.5 at home",
+            r"A.*?over 3\.5 at home",
             text,
         ),
         btts=_percent_after(
-            r"\(A\).*?BTS matches at home",
+            r"A.*?BTS matches at home",
             text,
         ),
     )
@@ -270,9 +276,7 @@ def _extract_corner_stats(
     def startswith_line(
         marker: str,
     ) -> str | None:
-
         for value in text.splitlines():
-
             if value.strip().lower().startswith(
                 marker.lower()
             ):
@@ -366,9 +370,8 @@ def _extract_corner_stats(
 def _extract_form(
     text: str,
 ) -> FormStats:
-
     match = re.search(
-        r"Points Per Game \(PPG\)\s+"
+        r"Points Per Game PPG\s+"
         r"Home\s*"
         + _NUM
         + r"\s+"
@@ -400,6 +403,7 @@ def _extract_form(
 def _extract_h2h(
     text: str,
 ) -> H2HStats:
+    home_team, away_team = _extract_team_names(text)
 
     block_match = re.search(
         r"H2H stats: summary of encounters above"
@@ -417,13 +421,10 @@ def _extract_h2h(
     def line_value(
         prefix: str,
     ) -> float | None:
-
         for line in block.splitlines():
-
             if line.strip().lower().startswith(
                 prefix.lower()
             ):
-
                 values = _numbers(line)
 
                 return (
@@ -434,11 +435,14 @@ def _extract_h2h(
 
         return None
 
+    home_pattern = re.escape(home_team)
+    away_pattern = re.escape(away_team)
+
     summary = re.search(
-        r"In the (\d+) matches above.*?"
-        r"Real Betis won (\d+) times,\s*"
-        r"(\d+) matches ended in a draw,\s*"
-        r"Getafe won (\d+) times",
+        rf"In the (\d+) matches above.*?"
+        rf"{home_pattern}\s+won\s+(\d+)\s+times,\s*"
+        rf"(\d+)\s+matches ended in a draw,\s*"
+        rf"{away_pattern}\s+won\s+(\d+)\s+times",
         text,
         re.IGNORECASE | re.DOTALL,
     )
@@ -473,25 +477,25 @@ def _extract_h2h(
         draws=draws,
         away_wins=away_wins,
         home_goals=line_value(
-            "Real Betis total goals"
+            f"{home_team} total goals"
         ),
         away_goals=line_value(
-            "Getafe total goals"
+            f"{away_team} total goals"
         ),
         home_goals_per_match=line_value(
-            "Real Betis goals per match"
+            f"{home_team} goals per match"
         ),
         away_goals_per_match=line_value(
-            "Getafe goals per match"
+            f"{away_team} goals per match"
         ),
         total_goals_per_match=line_value(
             "Total goals per match"
         ),
         home_scored_rate=line_value(
-            "Real Betis scored"
+            f"{home_team} scored"
         ),
         away_scored_rate=line_value(
-            "Getafe scored"
+            f"{away_team} scored"
         ),
         btts_rate=line_value(
             "Both teams scored"
@@ -511,7 +515,6 @@ def _extract_h2h(
 def _extract_distribution(
     text: str,
 ) -> TeamDistributionStats:
-
     block_match = re.search(
         r"Home vs Away distribution"
         r"(.*?)(?:Current Streaks|LEAGUESMATCHES|$)",
@@ -531,7 +534,6 @@ def _extract_distribution(
         float | None,
         float | None,
     ]:
-
         match = re.search(
             rf"({_NUM})%\s+({_NUM})%"
             rf"\s+.*?{re.escape(label)}",
@@ -564,7 +566,6 @@ def _extract_distribution(
 def _extract_timing(
     text: str,
 ) -> TimingStats:
-
     block_match = re.search(
         r"Average goal times"
         r"(.*?)(?:Outcome scenarios|LEAGUESMATCHES|$)",
@@ -631,87 +632,4 @@ def parse_soccerstats_text(
 
     sections: dict[str, Any] = {}
 
-    markers = {
-        "goals": "Goal statistics",
-        "corners": "Avg Corners For",
-        "form": "Points Per Game (PPG)",
-        "h2h": "H2H stats: summary of encounters above",
-        "distribution": "Home vs Away distribution",
-        "timing": "Average goal times",
-    }
-
-    for name, marker in markers.items():
-
-        index = clean.lower().find(
-            marker.lower()
-        )
-
-        if index >= 0:
-            sections[name] = clean[
-                index:index + 2500
-            ]
-
-    return SoccerStatsData(
-        match=match,
-        goals=_extract_goal_stats(clean),
-        corners=_extract_corner_stats(clean),
-        form=_extract_form(clean),
-        h2h=_extract_h2h(clean),
-        distribution=_extract_distribution(clean),
-        timing=_extract_timing(clean),
-        raw_sections=sections,
-        source_metadata={
-            "parser": SOCCERSTATS_PARSER_VERSION,
-            "source": "SoccerSTATS",
-        },
-    )
-
-
-def extract_pdf_text(
-    pdf_path: str | Path,
-) -> str:
-    """Extract text from a SoccerSTATS PDF."""
-
-    path = Path(pdf_path)
-
-    if not path.is_file():
-        raise FileNotFoundError(
-            f"PDF bulunamadı: {path}"
-        )
-
-    if path.suffix.lower() != ".pdf":
-        raise ValueError(
-            "SoccerSTATS parser yalnızca PDF kabul eder."
-        )
-
-    reader = PdfReader(str(path))
-
-    text = "\n".join(
-        page.extract_text() or ""
-        for page in reader.pages
-    )
-
-    if not text.strip():
-        raise ValueError(
-            "PDF içinden okunabilir metin çıkarılamadı."
-        )
-
-    return text
-
-
-def parse_soccerstats_pdf(
-    pdf_path: str | Path,
-) -> SoccerStatsData:
-    """Read and parse a SoccerSTATS PDF."""
-
-    return parse_soccerstats_text(
-        extract_pdf_text(pdf_path)
-    )
-
-
-__all__ = [
-    "SOCCERSTATS_PARSER_VERSION",
-    "extract_pdf_text",
-    "parse_soccerstats_text",
-    "parse_soccerstats_pdf",
-  ]
+   
