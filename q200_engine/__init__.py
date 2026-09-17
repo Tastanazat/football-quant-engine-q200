@@ -124,6 +124,14 @@ from .statshub_ocr import (
     create_statshub_review,
 )
 
+from .statshub_feature_adapter import (
+    STATSHUB_FEATURE_ADAPTER_VERSION,
+    STATSHUB_FOR_TO_FEATURE,
+    statshub_pair_to_feature_input,
+    build_features_from_statshub_pair,
+    build_features_from_approved_reviews,
+)
+
 from .feature_engine import (
     FEATURE_ENGINE_VERSION,
     FeatureSet,
@@ -220,8 +228,8 @@ __all__ = [
     "calibration_by_market",
 
     "PERFORMANCE_VERSION",
-    "PerformanceSummary",
     "MarketPerformance",
+    "PerformanceSummary",
     "summarize_history",
     "market_performance",
 
@@ -254,6 +262,12 @@ __all__ = [
     "flatten_statshub_summary",
     "ocr_image_to_text",
     "create_statshub_review",
+
+    "STATSHUB_FEATURE_ADAPTER_VERSION",
+    "STATSHUB_FOR_TO_FEATURE",
+    "statshub_pair_to_feature_input",
+    "build_features_from_statshub_pair",
+    "build_features_from_approved_reviews",
 
     "FEATURE_ENGINE_VERSION",
     "FeatureSet",
