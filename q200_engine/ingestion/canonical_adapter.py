@@ -5,13 +5,11 @@ Q200 V3.1
 
 CanonicalMatchData
         ↓
-Canonical model fields
-        ↓
-TeamStats
+Q200 TeamStats
         ↓
 Q200 Model
 
-Bu katman yalnızca validated canonical statistics verisini
+Bu katman yalnızca doğrulanmış canonical statistics verisini
 Q200'ün mevcut TeamStats sözleşmesine dönüştürür.
 
 ÖNEMLİ:
@@ -19,8 +17,8 @@ Q200'ün mevcut TeamStats sözleşmesine dönüştürür.
 - Lambda hesaplamaz.
 - Odds kullanmaz.
 - Canonical alanların anlamını değiştirmez.
-- StatsHub'taki genel AVG alanlarını home/away takım değerlerine
-  tahmin ederek dönüştürmez.
+- Genel StatsHub AVG değerlerini home/away değerlerine tahmin ederek
+  dönüştürmez.
 - Q200 çekirdek lambda formülünü değiştirmez.
 """
 
@@ -37,10 +35,7 @@ from .validated_pipeline import (
 )
 
 
-CANONICAL_ADAPTER_VERSION = (
-    "Q200-CANONICAL-ADAPTER-V1"
-)
-
+CANONICAL_ADAPTER_VERSION = "Q200-CANONICAL-ADAPTER-V1"
 
 MODEL_REQUIRED_CANONICAL_FIELDS = (
     "home_gf_per_match",
@@ -49,24 +44,24 @@ MODEL_REQUIRED_CANONICAL_FIELDS = (
     "away_ga_per_match",
 )
 
-
-OPTIONAL_MODEL_FIELDS = (
-    "home_xg",
-    "home_xga",
-    "away_xga",
-    "away_xg",
-)
+MODEL_FIELD_MAP = {
+    "home_gf_per_match": "home_gf",
+    "home_ga_per_match": "home_ga",
+    "away_gf_per_match": "away_gf",
+    "away_ga_per_match": "away_ga",
+    "home_xg": "home_xg",
+    "home_xga": "home_xga",
+    "away_xga": "away_xga",
+    "away_xg": "away_xg",
+}
 
 
 def _canonical_model_values(
     canonical: CanonicalMatchData,
 ) -> dict[str, Any]:
-    """Canonical veriden Q200 TeamStats alanlarını seçer."""
+    """Canonical veriden yalnızca Q200 model alanlarını seçer."""
 
-    if not isinstance(
-        canonical,
-        CanonicalMatchData,
-    ):
+    if not isinstance(canonical, CanonicalMatchData):
         raise TypeError(
             "canonical CanonicalMatchData olmalıdır."
         )
@@ -76,8 +71,7 @@ def _canonical_model_values(
     missing = [
         field
         for field in MODEL_REQUIRED_CANONICAL_FIELDS
-        if field not in values
-        or values[field] is None
+        if field not in values or values[field] is None
     ]
 
     if missing:
@@ -86,27 +80,14 @@ def _canonical_model_values(
             + ", ".join(missing)
         )
 
-    mapped: dict[str, Any] = {
-        "home_gf": values[
-            "home_gf_per_match"
-        ],
-        "home_ga": values[
-            "home_ga_per_match"
-        ],
-        "away_gf": values[
-            "away_gf_per_match"
-        ],
-        "away_ga": values[
-            "away_ga_per_match"
-        ],
-    }
+    mapped: dict[str, Any] = {}
 
-    for field in OPTIONAL_MODEL_FIELDS:
+    for canonical_field, model_field in MODEL_FIELD_MAP.items():
         if (
-            field in values
-            and values[field] is not None
+            canonical_field in values
+            and values[canonical_field] is not None
         ):
-            mapped[field] = values[field]
+            mapped[model_field] = values[canonical_field]
 
     return mapped
 
@@ -115,73 +96,48 @@ def canonical_to_team_stats(
     canonical: CanonicalMatchData,
 ) -> TeamStats:
     """
-    CanonicalMatchData → Q200 TeamStats.
+    CanonicalMatchData -> Q200 TeamStats.
 
-    Dönüşüm:
+    Model için zorunlu alanlar:
+        home_gf_per_match -> home_gf
+        home_ga_per_match -> home_ga
+        away_gf_per_match -> away_gf
+        away_ga_per_match -> away_ga
 
-        home_gf_per_match
-            ↓
-        home_gf
-
-        home_ga_per_match
-            ↓
-        home_ga
-
-        away_gf_per_match
-            ↓
-        away_gf
-
-        away_ga_per_match
-            ↓
-        away_ga
-
-    StatsHub'taki genel özet alanları:
-
+    Genel StatsHub alanları örneğin:
         goals_avg
         xg_avg
         total_shots_avg
+        shots_on_target_avg
         possession_avg
         corners_avg
 
-    takım tarafına tahmin edilmez.
-
-    Bu alanlar canonical/feature katmanında
-    korunmaya devam eder.
+    takım tarafına tahmin edilmez ve modele sokulmaz.
     """
 
-    mapped = _canonical_model_values(
-        canonical
-    )
+    mapped = _canonical_model_values(canonical)
 
-    return build_team_stats(
-        mapped
-    )
+    return build_team_stats(mapped)
 
 
 def validated_canonical_to_team_stats(
     result: ValidatedCanonicalData,
 ) -> TeamStats:
     """
-    Validation'dan geçmiş canonical veriyi
-    TeamStats'e dönüştürür.
+    Validation'dan geçmiş canonical veriyi TeamStats'e dönüştürür.
 
-    Validation başarısızsa Q200 TeamStats
-    oluşturulmaz.
+    Validation başarısızsa Q200 TeamStats oluşturulmaz.
     """
 
-    canonical = require_valid(
-        result
-    )
+    canonical = require_valid(result)
 
-    return canonical_to_team_stats(
-        canonical
-    )
+    return canonical_to_team_stats(canonical)
 
 
 __all__ = [
     "CANONICAL_ADAPTER_VERSION",
     "MODEL_REQUIRED_CANONICAL_FIELDS",
-    "OPTIONAL_MODEL_FIELDS",
+    "MODEL_FIELD_MAP",
     "canonical_to_team_stats",
     "validated_canonical_to_team_stats",
 ]
