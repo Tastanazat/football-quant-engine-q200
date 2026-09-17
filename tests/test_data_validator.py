@@ -110,7 +110,10 @@ def test_percentage_below_zero_fails():
     )
 
     assert report.valid is False
-    assert report.issues[0].code == "NEGATIVE"
+    assert (
+        report.issues[0].code
+        == "PERCENTAGE_RANGE"
+    )
 
 
 def test_nan_fails():
