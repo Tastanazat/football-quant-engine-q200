@@ -38,8 +38,8 @@ feature'ları kullanacağına henüz müdahale etmez.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from typing import Any, Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any, Mapping
 
 
 FEATURE_SELECTION_VERSION = "Q200-FEATURE-SELECTION-V1"
@@ -111,7 +111,11 @@ def _validate_threshold(
     return value
 
 
-def _validate_non_negative_int(value: int, *, name: str) -> int:
+def _validate_non_negative_int(
+    value: int,
+    *,
+    name: str,
+) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{name} integer olmalıdır.")
 
@@ -137,11 +141,21 @@ def _read_quality_value(
 
 
 def _missing_rate(quality: Any) -> float:
-    completeness = _read_quality_value(quality, "completeness")
+    completeness = _read_quality_value(
+        quality,
+        "completeness",
+    )
 
     if completeness is not None:
         completeness = float(completeness)
-        return max(0.0, min(1.0, 1.0 - completeness))
+
+        return max(
+            0.0,
+            min(
+                1.0,
+                1.0 - completeness,
+            ),
+        )
 
     observation_count = _read_quality_value(
         quality,
@@ -170,18 +184,29 @@ def _missing_rate(quality: Any) -> float:
 
     return min(
         1.0,
-        max(0.0, missing_count / observation_count),
+        max(
+            0.0,
+            missing_count / observation_count,
+        ),
     )
 
 
 def _feature_name(quality: Any) -> str:
-    name = _read_quality_value(quality, "feature_name")
+    name = _read_quality_value(
+        quality,
+        "feature_name",
+    )
 
     if name is None:
-        name = _read_quality_value(quality, "name")
+        name = _read_quality_value(
+            quality,
+            "name",
+        )
 
     if name is None:
-        raise ValueError("Feature kalite kaydında feature_name bulunamadı.")
+        raise ValueError(
+            "Feature kalite kaydında feature_name bulunamadı."
+        )
 
     name = str(name).strip()
 
@@ -227,7 +252,9 @@ def _constant(quality: Any) -> bool:
     )
 
 
-def _validate_decision(decision: str) -> str:
+def _validate_decision(
+    decision: str,
+) -> str:
     decision = str(decision).upper().strip()
 
     if decision not in DECISIONS:
@@ -248,9 +275,16 @@ def discover_selection_candidates(
     """
 
     if isinstance(quality_report, Mapping):
-        features = quality_report.get("features", ())
+        features = quality_report.get(
+            "features",
+            (),
+        )
     else:
-        features = getattr(quality_report, "features", ())
+        features = getattr(
+            quality_report,
+            "features",
+            (),
+        )
 
     if features is None:
         return []
@@ -297,7 +331,9 @@ def select_features(
         name="redundancy_correlation",
     )
 
-    candidates = discover_selection_candidates(quality_report)
+    candidates = discover_selection_candidates(
+        quality_report
+    )
 
     observation_count = _read_quality_value(
         quality_report,
@@ -318,6 +354,7 @@ def select_features(
         observations = _observation_count(quality)
         valid = _valid_count(quality)
         constant = _constant(quality)
+
         missing_rate = _missing_rate(quality)
         completeness = 1.0 - missing_rate
 
@@ -338,7 +375,10 @@ def select_features(
         if constant:
             reasons.append("CONSTANT_FEATURE")
 
-        if missing_rate > max_missing_rate or valid == 0:
+        if (
+            missing_rate > max_missing_rate
+            or valid == 0
+        ):
             decision = "EXCLUDE"
 
         elif constant:
@@ -351,12 +391,16 @@ def select_features(
             decision = "KEEP"
 
         if not reasons:
-            reasons.append("DATA_QUALITY_ACCEPTABLE")
+            reasons.append(
+                "DATA_QUALITY_ACCEPTABLE"
+            )
 
         decisions.append(
             FeatureSelectionDecision(
                 feature_name=name,
-                decision=_validate_decision(decision),
+                decision=_validate_decision(
+                    decision
+                ),
                 reasons=tuple(reasons),
                 completeness=completeness,
                 missing_rate=missing_rate,
@@ -366,7 +410,9 @@ def select_features(
             )
         )
 
-    decisions.sort(key=lambda item: item.feature_name)
+    decisions.sort(
+        key=lambda item: item.feature_name
+    )
 
     redundant_pairs = _extract_redundant_pairs(
         quality_report,
@@ -379,7 +425,9 @@ def select_features(
         for name in pair
     }
 
-    updated_decisions: list[FeatureSelectionDecision] = []
+    updated_decisions: list[
+        FeatureSelectionDecision
+    ] = []
 
     for decision in decisions:
         if (
@@ -388,7 +436,9 @@ def select_features(
         ):
             reasons = tuple(
                 list(decision.reasons)
-                + ["HIGH_CORRELATION_REDUNDANCY"]
+                + [
+                    "HIGH_CORRELATION_REDUNDANCY"
+                ]
             )
 
             updated_decisions.append(
@@ -403,13 +453,16 @@ def select_features(
                     constant=decision.constant,
                 )
             )
+
         elif (
             decision.feature_name in redundant_names
             and decision.decision == "FLAG"
         ):
             reasons = tuple(
                 list(decision.reasons)
-                + ["HIGH_CORRELATION_REDUNDANCY"]
+                + [
+                    "HIGH_CORRELATION_REDUNDANCY"
+                ]
             )
 
             updated_decisions.append(
@@ -424,8 +477,11 @@ def select_features(
                     constant=decision.constant,
                 )
             )
+
         else:
-            updated_decisions.append(decision)
+            updated_decisions.append(
+                decision
+            )
 
     return FeatureSelectionReport(
         version=FEATURE_SELECTION_VERSION,
@@ -434,7 +490,9 @@ def select_features(
         max_missing_rate=max_missing_rate,
         redundancy_correlation=redundancy_correlation,
         decisions=tuple(updated_decisions),
-        redundant_pairs=tuple(redundant_pairs),
+        redundant_pairs=tuple(
+            redundant_pairs
+        ),
     )
 
 
@@ -466,10 +524,23 @@ def _extract_redundant_pairs(
     """
 
     if isinstance(quality_report, Mapping):
-        correlations = quality_report.get("correlations", ())
-        existing_pairs = quality_report.get("redundant_pairs", ())
+        correlations = quality_report.get(
+            "correlations",
+            (),
+        )
+
+        existing_pairs = quality_report.get(
+            "redundant_pairs",
+            (),
+        )
+
     else:
-        correlations = getattr(quality_report, "correlations", ())
+        correlations = getattr(
+            quality_report,
+            "correlations",
+            (),
+        )
+
         existing_pairs = getattr(
             quality_report,
             "redundant_pairs",
@@ -493,7 +564,10 @@ def _extract_redundant_pairs(
 
             try:
                 correlation = float(value)
-            except (TypeError, ValueError):
+            except (
+                TypeError,
+                ValueError,
+            ):
                 continue
 
             if abs(correlation) >= threshold:
@@ -518,13 +592,23 @@ def _extract_redundant_pairs(
                 )
 
                 try:
-                    correlation = abs(float(correlation))
-                except (TypeError, ValueError):
+                    correlation = abs(
+                        float(correlation)
+                    )
+                except (
+                    TypeError,
+                    ValueError,
+                ):
                     continue
 
             try:
-                correlation = float(correlation)
-            except (TypeError, ValueError):
+                correlation = float(
+                    correlation
+                )
+            except (
+                TypeError,
+                ValueError,
+            ):
                 continue
 
             if correlation >= threshold:
@@ -533,8 +617,13 @@ def _extract_redundant_pairs(
     return sorted(pairs)
 
 
-def _parse_pair_key(key: Any) -> tuple[str, str] | None:
-    if not isinstance(key, (tuple, list)):
+def _parse_pair_key(
+    key: Any,
+) -> tuple[str, str] | None:
+    if not isinstance(
+        key,
+        (tuple, list),
+    ):
         return None
 
     if len(key) != 2:
@@ -543,20 +632,43 @@ def _parse_pair_key(key: Any) -> tuple[str, str] | None:
     first = str(key[0]).strip()
     second = str(key[1]).strip()
 
-    if not first or not second or first == second:
+    if (
+        not first
+        or not second
+        or first == second
+    ):
         return None
 
-    return tuple(sorted((first, second)))
+    return tuple(
+        sorted(
+            (first, second)
+        )
+    )
 
 
-def _parse_pair(item: Any) -> tuple[str, str] | None:
-    if isinstance(item, (tuple, list)):
+def _parse_pair(
+    item: Any,
+) -> tuple[str, str] | None:
+    if isinstance(
+        item,
+        (tuple, list),
+    ):
         return _parse_pair_key(item)
 
-    feature_a = _read_quality_value(item, "feature_a")
-    feature_b = _read_quality_value(item, "feature_b")
+    feature_a = _read_quality_value(
+        item,
+        "feature_a",
+    )
 
-    if feature_a is None or feature_b is None:
+    feature_b = _read_quality_value(
+        item,
+        "feature_b",
+    )
+
+    if (
+        feature_a is None
+        or feature_b is None
+    ):
         return None
 
     feature_a = str(feature_a).strip()
@@ -569,7 +681,11 @@ def _parse_pair(item: Any) -> tuple[str, str] | None:
     ):
         return None
 
-    return tuple(sorted((feature_a, feature_b)))
+    return tuple(
+        sorted(
+            (feature_a, feature_b)
+        )
+    )
 
 
 def selected_feature_names(
@@ -587,7 +703,10 @@ def selected_feature_names(
     Bu fonksiyon model.py'yi değiştirmez.
     """
 
-    if not isinstance(report, FeatureSelectionReport):
+    if not isinstance(
+        report,
+        FeatureSelectionReport,
+    ):
         raise TypeError(
             "report FeatureSelectionReport olmalıdır."
         )
@@ -614,12 +733,46 @@ def feature_selection_to_dict(
     FeatureSelectionReport'u JSON uyumlu dict'e dönüştürür.
     """
 
-    if not isinstance(report, FeatureSelectionReport):
+    if not isinstance(
+        report,
+        FeatureSelectionReport,
+    ):
         raise TypeError(
             "report FeatureSelectionReport olmalıdır."
         )
 
-    return asdict(report)
+    return {
+        "version": report.version,
+        "observation_count": report.observation_count,
+        "feature_count": report.feature_count,
+        "max_missing_rate": report.max_missing_rate,
+        "redundancy_correlation": (
+            report.redundancy_correlation
+        ),
+        "decisions": [
+            {
+                "feature_name": decision.feature_name,
+                "decision": decision.decision,
+                "reasons": list(
+                    decision.reasons
+                ),
+                "completeness": decision.completeness,
+                "missing_rate": decision.missing_rate,
+                "observation_count": (
+                    decision.observation_count
+                ),
+                "valid_count": (
+                    decision.valid_count
+                ),
+                "constant": decision.constant,
+            }
+            for decision in report.decisions
+        ],
+        "redundant_pairs": [
+            list(pair)
+            for pair in report.redundant_pairs
+        ],
+    }
 
 
 def feature_selection_summary(
@@ -629,7 +782,10 @@ def feature_selection_summary(
     Kararların özetini döndürür.
     """
 
-    if not isinstance(report, FeatureSelectionReport):
+    if not isinstance(
+        report,
+        FeatureSelectionReport,
+    ):
         raise TypeError(
             "report FeatureSelectionReport olmalıdır."
         )
