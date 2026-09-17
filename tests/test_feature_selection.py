@@ -1,403 +1,208 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import pytest
 
+from q200_engine.feature_quality import (
+    build_feature_quality_report,
+)
+
 from q200_engine.feature_selection import (
-    DEFAULT_MAX_MISSING_RATE,
-    DEFAULT_REDUNDANCY_CORRELATION,
+    DEFAULT_MISSINGNESS_THRESHOLD,
     FEATURE_SELECTION_VERSION,
     FeatureSelectionReport,
-    feature_selection_summary,
+    build_feature_selection,
     feature_selection_to_dict,
-    select_features,
+    filter_feature_mapping,
+    review_feature_names,
     selected_feature_names,
 )
 
 
-@dataclass(frozen=True)
-class Quality:
-    feature_name: str
-    observation_count: int
-    valid_count: int
-    missing_count: int
-    completeness: float
-    mean: float
-    minimum: float
-    maximum: float
-    variance: float
-    constant: bool
+def _quality_report():
+    rows = [
+        {
+            "goals": 1.0,
+            "xg": 1.20,
+            "shots": 10.0,
+            "possession": 55.0,
+        },
+        {
+            "goals": 2.0,
+            "xg": 1.80,
+            "shots": 15.0,
+            "possession": 60.0,
+        },
+        {
+            "goals": 0.0,
+            "xg": 0.70,
+            "shots": 8.0,
+            "possession": 45.0,
+        },
+        {
+            "goals": 1.0,
+            "xg": 1.10,
+            "shots": 12.0,
+            "possession": 50.0,
+        },
+    ]
 
-
-@dataclass(frozen=True)
-class Pair:
-    feature_a: str
-    feature_b: str
-    correlation: float
-    absolute_correlation: float
-    redundant: bool = True
-
-
-@dataclass(frozen=True)
-class QualityReport:
-    observation_count: int
-    feature_count: int
-    features: tuple[Quality, ...]
-    correlations: tuple[Pair, ...]
-    redundant_pairs: tuple[tuple[str, str], ...] = ()
-
-
-def make_quality_report():
-    features = (
-        Quality(
-            feature_name="shots",
-            observation_count=10,
-            valid_count=10,
-            missing_count=0,
-            completeness=1.0,
-            mean=20.0,
-            minimum=10.0,
-            maximum=30.0,
-            variance=10.0,
-            constant=False,
-        ),
-        Quality(
-            feature_name="shots_on_target",
-            observation_count=10,
-            valid_count=10,
-            missing_count=0,
-            completeness=1.0,
-            mean=8.0,
-            minimum=3.0,
-            maximum=14.0,
-            variance=5.0,
-            constant=False,
-        ),
-        Quality(
-            feature_name="corners",
-            observation_count=10,
-            valid_count=8,
-            missing_count=2,
-            completeness=0.8,
-            mean=5.0,
-            minimum=2.0,
-            maximum=9.0,
-            variance=3.0,
-            constant=False,
-        ),
-        Quality(
-            feature_name="constant_feature",
-            observation_count=10,
-            valid_count=10,
-            missing_count=0,
-            completeness=1.0,
-            mean=5.0,
-            minimum=5.0,
-            maximum=5.0,
-            variance=0.0,
-            constant=True,
-        ),
-        Quality(
-            feature_name="bad_feature",
-            observation_count=10,
-            valid_count=4,
-            missing_count=6,
-            completeness=0.4,
-            mean=1.0,
-            minimum=0.0,
-            maximum=2.0,
-            variance=1.0,
-            constant=False,
-        ),
-    )
-
-    correlations = (
-        Pair(
-            feature_a="shots",
-            feature_b="shots_on_target",
-            correlation=0.91,
-            absolute_correlation=0.91,
-        ),
-        Pair(
-            feature_a="corners",
-            feature_b="possession",
-            correlation=0.40,
-            absolute_correlation=0.40,
-            redundant=False,
-        ),
-    )
-
-    return QualityReport(
-        observation_count=10,
-        feature_count=len(features),
-        features=features,
-        correlations=correlations,
+    return build_feature_quality_report(
+        rows,
+        correlation_threshold=0.85,
     )
 
 
-def test_default_thresholds():
-    assert DEFAULT_MAX_MISSING_RATE == 0.50
-    assert DEFAULT_REDUNDANCY_CORRELATION == 0.85
+def test_feature_selection_version():
+    report = _quality_report()
+
+    selection = build_feature_selection(report)
+
+    assert selection.version == FEATURE_SELECTION_VERSION
 
 
-def test_selection_report_version():
-    report = select_features(
-        make_quality_report()
-    )
+def test_feature_selection_returns_report():
+    report = _quality_report()
 
-    assert report.version == FEATURE_SELECTION_VERSION
+    selection = build_feature_selection(report)
+
     assert isinstance(
-        report,
+        selection,
         FeatureSelectionReport,
     )
 
 
-def test_good_feature_is_redundant_when_highly_correlated():
-    report = select_features(
-        make_quality_report()
+def test_clean_features_are_kept():
+    report = _quality_report()
+
+    selection = build_feature_selection(report)
+
+    assert "goals" in selected_feature_names(selection)
+
+
+def test_selection_counts_match_decisions():
+    report = _quality_report()
+
+    selection = build_feature_selection(report)
+
+    total = (
+        len(selection.selected_features)
+        + len(selection.review_features)
+        + len(selection.excluded_features)
     )
 
-    decisions = {
-        item.feature_name: item
-        for item in report.decisions
+    assert total == selection.feature_count
+
+
+def test_selection_does_not_automatically_exclude_features():
+    report = _quality_report()
+
+    selection = build_feature_selection(report)
+
+    assert selection.excluded_features == ()
+
+
+def test_mapping_filter_keeps_selected_features():
+    report = _quality_report()
+
+    selection = build_feature_selection(report)
+
+    values = {
+        feature.feature_name: 1.0
+        for feature in report.features
     }
 
-    assert (
-        decisions["shots"].decision
-        == "REDUNDANT"
+    filtered = filter_feature_mapping(
+        values,
+        selection,
     )
 
-    assert (
-        decisions["shots_on_target"].decision
-        == "REDUNDANT"
+    assert set(filtered).issubset(
+        set(selection.selected_features)
     )
 
 
-def test_constant_feature_is_flagged():
-    report = select_features(
-        make_quality_report()
-    )
+def test_mapping_can_include_review_features():
+    report = _quality_report()
 
-    decisions = {
-        item.feature_name: item
-        for item in report.decisions
+    selection = build_feature_selection(report)
+
+    values = {
+        feature.feature_name: 1.0
+        for feature in report.features
     }
 
-    assert (
-        decisions["constant_feature"].decision
-        == "FLAG"
+    filtered = filter_feature_mapping(
+        values,
+        selection,
+        include_review=True,
     )
 
-    assert (
-        "CONSTANT_FEATURE"
-        in decisions["constant_feature"].reasons
-    )
-
-
-def test_high_missing_feature_is_excluded():
-    report = select_features(
-        make_quality_report()
-    )
-
-    decisions = {
-        item.feature_name: item
-        for item in report.decisions
-    }
-
-    assert (
-        decisions["bad_feature"].decision
-        == "EXCLUDE"
-    )
-
-    assert (
-        "HIGH_MISSING_RATE"
-        in decisions["bad_feature"].reasons
+    assert set(filtered).issubset(
+        set(selection.selected_features)
+        | set(selection.review_features)
     )
 
 
-def test_partial_missing_feature_is_flagged():
-    report = select_features(
-        make_quality_report()
-    )
+def test_selection_to_dict():
+    report = _quality_report()
 
-    decisions = {
-        item.feature_name: item
-        for item in report.decisions
-    }
+    selection = build_feature_selection(report)
 
-    assert (
-        decisions["corners"].decision
-        == "FLAG"
-    )
+    data = feature_selection_to_dict(selection)
 
-    assert (
-        "PARTIAL_MISSING_DATA"
-        in decisions["corners"].reasons
-    )
-
-
-def test_high_correlation_creates_redundancy():
-    report = select_features(
-        make_quality_report()
-    )
-
-    assert (
-        "shots",
-        "shots_on_target",
-    ) in report.redundant_pairs
-
-
-def test_redundancy_does_not_delete_feature():
-    report = select_features(
-        make_quality_report()
-    )
-
-    names = {
-        item.feature_name
-        for item in report.decisions
-    }
-
-    assert "shots" in names
-    assert "shots_on_target" in names
-
-
-def test_selected_names_default_only_keep():
-    report = select_features(
-        make_quality_report()
-    )
-
-    names = selected_feature_names(report)
-
-    assert names == ()
-
-
-def test_selected_names_can_include_flagged():
-    report = select_features(
-        make_quality_report()
-    )
-
-    names = selected_feature_names(
-        report,
-        include_flagged=True,
-    )
-
-    assert "corners" in names
-    assert "constant_feature" in names
-    assert "bad_feature" not in names
-
-
-def test_selected_names_can_include_redundant():
-    report = select_features(
-        make_quality_report()
-    )
-
-    names = selected_feature_names(
-        report,
-        include_redundant=True,
-    )
-
-    assert "shots" in names
-    assert "shots_on_target" in names
-
-
-def test_summary():
-    report = select_features(
-        make_quality_report()
-    )
-
-    summary = feature_selection_summary(report)
-
-    assert summary["KEEP"] == 0
-    assert summary["FLAG"] == 2
-    assert summary["REDUNDANT"] == 2
-    assert summary["EXCLUDE"] == 1
-
-
-def test_serialization():
-    report = select_features(
-        make_quality_report()
-    )
-
-    data = feature_selection_to_dict(report)
-
+    assert isinstance(data, dict)
     assert data["version"] == FEATURE_SELECTION_VERSION
+    assert "decisions" in data
+    assert "selected_features" in data
+
+
+def test_review_features_are_accessible():
+    report = _quality_report()
+
+    selection = build_feature_selection(report)
+
     assert isinstance(
-        data["decisions"],
-        list,
-    )
-    assert isinstance(
-        data["redundant_pairs"],
-        list,
-    )
-
-    assert all(
-        isinstance(item, dict)
-        for item in data["decisions"]
-    )
-
-    assert all(
-        isinstance(item["reasons"], list)
-        for item in data["decisions"]
+        review_feature_names(selection),
+        tuple,
     )
 
 
-def test_threshold_validation():
-    with pytest.raises(ValueError):
-        select_features(
-            make_quality_report(),
-            max_missing_rate=1.5,
-        )
+def test_missingness_threshold_validation():
+    report = _quality_report()
 
     with pytest.raises(ValueError):
-        select_features(
-            make_quality_report(),
-            redundancy_correlation=-0.1,
+        build_feature_selection(
+            report,
+            missingness_threshold=1.5,
         )
 
 
-def test_empty_report_is_safe():
-    report = QualityReport(
-        observation_count=0,
-        feature_count=0,
-        features=(),
-        correlations=(),
-    )
+def test_correlation_threshold_validation():
+    report = _quality_report()
 
-    result = select_features(report)
-
-    assert result.feature_count == 0
-    assert result.decisions == ()
-    assert result.redundant_pairs == ()
+    with pytest.raises(ValueError):
+        build_feature_selection(
+            report,
+            correlation_threshold=-0.1,
+        )
 
 
-def test_mapping_based_report_is_supported():
-    report = {
-        "observation_count": 2,
-        "feature_count": 1,
-        "features": [
-            {
-                "feature_name": "possession",
-                "observation_count": 2,
-                "valid_count": 2,
-                "missing_count": 0,
-                "completeness": 1.0,
-                "constant": False,
-            }
-        ],
-        "correlations": {},
-    }
+def test_default_missingness_threshold():
+    assert DEFAULT_MISSINGNESS_THRESHOLD == 0.50
 
-    result = select_features(report)
 
-    assert result.feature_count == 1
+def test_invalid_report_type():
+    with pytest.raises(TypeError):
+        build_feature_selection("invalid")
 
-    assert (
-        result.decisions[0].feature_name
-        == "possession"
-    )
 
-    assert (
-        result.decisions[0].decision
-        == "KEEP"
-    )
+def test_invalid_mapping_type():
+    report = _quality_report()
+
+    selection = build_feature_selection(report)
+
+    with pytest.raises(TypeError):
+        filter_feature_mapping(
+            [],
+            selection,
+        )
