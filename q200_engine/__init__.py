@@ -131,6 +131,21 @@ from .feature_engine import (
     feature_set_to_dict,
 )
 
+from .feature_quality import (
+    FEATURE_QUALITY_VERSION,
+    DEFAULT_CORRELATION_THRESHOLD,
+    FeaturePair,
+    FeatureQuality,
+    FeatureQualityReport,
+    discover_features,
+    assess_feature_quality,
+    calculate_feature_correlation,
+    calculate_all_correlations,
+    find_redundant_features,
+    build_feature_quality_report,
+    feature_quality_to_dict,
+)
+
 from .dataset_backtest import (
     DATASET_BACKTEST_VERSION,
     DatasetBacktestItem,
@@ -230,6 +245,19 @@ __all__ = [
     "FeatureSet",
     "build_features",
     "feature_set_to_dict",
+
+    "FEATURE_QUALITY_VERSION",
+    "DEFAULT_CORRELATION_THRESHOLD",
+    "FeaturePair",
+    "FeatureQuality",
+    "FeatureQualityReport",
+    "discover_features",
+    "assess_feature_quality",
+    "calculate_feature_correlation",
+    "calculate_all_correlations",
+    "find_redundant_features",
+    "build_feature_quality_report",
+    "feature_quality_to_dict",
 
     "DATASET_BACKTEST_VERSION",
     "DatasetBacktestItem",
