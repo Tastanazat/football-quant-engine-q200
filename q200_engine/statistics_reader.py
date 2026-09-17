@@ -19,11 +19,25 @@ Input Validation
     ↓
 TeamStats
 
+Data Review desteği:
+
+CSV / XLSX
+    ↓
+Statistics Reader
+    ↓
+DataReview
+    ↓
+Manual Correction
+    ↓
+Approval
+    ↓
+Q200
+
 Bu katman:
 - Model hesabı yapmaz.
 - Odds kullanmaz.
 - Model olasılığı üretmez.
-- Statistics değerlerini değiştirmez.
+- Statistics değerlerini kendiliğinden değiştirmez.
 """
 
 from __future__ import annotations
@@ -165,7 +179,6 @@ def read_csv(
                     value
                 )
 
-            # Tamamen boş satırları atla.
             if any(
                 value is not None
                 for value in row.values()
@@ -361,4 +374,70 @@ def read_statistics_record(
 
     return dict(
         rows[row_index]
+    )
+
+
+# =========================================================
+# DATA REVIEW
+# =========================================================
+
+def read_statistics_review(
+    path: str | Path,
+    row_index: int = 0,
+    *,
+    review_id: str | None = None,
+    confidence: dict[str, float] | None = None,
+    metadata: dict[str, Any] | None = None,
+):
+    """
+    Statistics dosyasını okuyup Data Review oturumu oluşturur.
+
+    Başlangıçta bütün alanlar AUTO durumundadır.
+
+    Kullanıcı daha sonra:
+
+        update_review_field(...)
+        approve_review(...)
+
+    kullanarak değerleri kontrol edebilir.
+
+    Review onaylanmadan bu veriler
+    model katmanına gönderilemez.
+    """
+
+    from .data_review import create_review
+
+    record = read_statistics_record(
+        path,
+        row_index=row_index,
+    )
+
+    extension = (
+        Path(path)
+        .suffix
+        .lower()
+    )
+
+    if extension == ".csv":
+        source = "CSV"
+
+    elif extension == ".xlsx":
+        source = "XLSX"
+
+    else:
+        source = "OTHER"
+
+    if review_id is None:
+
+        review_id = (
+            f"{Path(path).name}:row:{row_index}"
+        )
+
+    return create_review(
+        review_id=review_id,
+        source_type=source,
+        source_file=str(path),
+        values=record,
+        confidence=confidence,
+        metadata=metadata,
     )
