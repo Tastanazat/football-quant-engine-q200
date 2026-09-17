@@ -8,15 +8,6 @@ External source ingestion layer:
     SoccerSTATS PDF
     StatsHub OCR
     Odds PDF
-
-Bu paket external kaynaklardan gelen verilerin
-canonical Q200 veri yapısına taşınmasını sağlar.
-
-ÖNEMLİ:
-Bu katman model hesabı yapmaz.
-Lambda hesabı yapmaz.
-Odds'u model oluştururken kullanmaz.
-Selection veya Kelly hesabı yapmaz.
 """
 
 from .models import (
@@ -36,6 +27,13 @@ from .models import (
     model_to_dict,
 )
 
+from .soccerstats_parser import (
+    SOCCERSTATS_PARSER_VERSION,
+    extract_pdf_text,
+    parse_soccerstats_text,
+    parse_soccerstats_pdf,
+)
+
 
 __all__ = [
     "INGESTION_VERSION",
@@ -52,4 +50,8 @@ __all__ = [
     "OddsData",
     "CanonicalMatchData",
     "model_to_dict",
+    "SOCCERSTATS_PARSER_VERSION",
+    "extract_pdf_text",
+    "parse_soccerstats_text",
+    "parse_soccerstats_pdf",
 ]
