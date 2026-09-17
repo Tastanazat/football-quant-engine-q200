@@ -15,6 +15,7 @@ from q200_engine.ingestion.soccerstats_parser import (
 PDF_PATH = (
     Path(__file__).resolve().parent
     / "fixtures"
+    / "soccerstats"
     / "WEB_1789630115.pdf"
 )
 
@@ -92,7 +93,6 @@ def test_real_soccerstats_pdf_parser_returns_populated_data():
         SoccerStatsData,
     )
 
-    # Parser'ın gerçek PDF'den boş bir nesne üretmesini engeller.
     data = vars(result)
 
     assert data
@@ -115,9 +115,7 @@ def test_real_soccerstats_pdf_parser_version():
         str,
     )
 
-    assert (
-        SOCCERSTATS_PARSER_VERSION
-    )
+    assert SOCCERSTATS_PARSER_VERSION
 
 
 def test_real_soccerstats_pdf_is_not_empty_after_parsing():
