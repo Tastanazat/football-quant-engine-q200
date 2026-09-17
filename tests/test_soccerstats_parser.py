@@ -293,17 +293,16 @@ def test_extract_pdf_text_rejects_non_pdf(
         extract_pdf_text(path)
 
 
-def test_real_pdf_fixture_if_present():
-    fixture = Path(
-        "tests/fixtures/"
-        "WEB_1789630115.pdf"
+def test_real_pdf_fixture():
+    fixture = (
+        Path(__file__).resolve().parent
+        / "fixtures"
+        / "soccerstats"
+        / "WEB_1789630115.pdf"
     )
 
-    if not fixture.exists():
-        pytest.skip(
-            "Gerçek SoccerSTATS PDF fixture "
-            "repoda bulunmuyor."
-        )
+    assert fixture.is_file()
+    assert fixture.stat().st_size > 0
 
     data = parse_soccerstats_pdf(
         fixture
