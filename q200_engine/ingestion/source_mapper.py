@@ -42,7 +42,7 @@ from .models import (
 )
 
 
-SOURCE_MAPPER_VERSION = "Q200-SOURCE-MAPPER-V2"
+SOURCE_MAPPER_VERSION = "Q200-SOURCE-MAPPER-V1"
 
 
 # ---------------------------------------------------------------------------
@@ -267,64 +267,40 @@ def map_soccerstats(
     _put(
         values,
         trace,
-        "home_scoring_rate",
-        goals.home_scoring_rate,
+        "total_goals_avg",
+        goals.total_goals_avg,
         source,
     )
 
     _put(
         values,
         trace,
-        "away_scoring_rate",
-        goals.away_scoring_rate,
+        "over_15_pct",
+        goals.over_15_pct,
         source,
     )
 
     _put(
         values,
         trace,
-        "home_conceding_rate",
-        goals.home_conceding_rate,
+        "over_25_pct",
+        goals.over_25_pct,
         source,
     )
 
     _put(
         values,
         trace,
-        "away_conceding_rate",
-        goals.away_conceding_rate,
+        "over_35_pct",
+        goals.over_35_pct,
         source,
     )
 
     _put(
         values,
         trace,
-        "over_1_5",
-        goals.over_1_5,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "over_2_5",
-        goals.over_2_5,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "over_3_5",
-        goals.over_3_5,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "btts",
-        goals.btts,
+        "btts_pct",
+        goals.btts_pct,
         source,
     )
 
@@ -333,104 +309,24 @@ def map_soccerstats(
     _put(
         values,
         trace,
-        "home_corners_for",
-        corners.home_corners_for,
+        "home_corners_avg",
+        corners.home_avg,
         source,
     )
 
     _put(
         values,
         trace,
-        "home_corners_against",
-        corners.home_corners_against,
+        "away_corners_avg",
+        corners.away_avg,
         source,
     )
 
     _put(
         values,
         trace,
-        "away_corners_for",
-        corners.away_corners_for,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "away_corners_against",
-        corners.away_corners_against,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "home_total_corners",
-        corners.home_total_corners,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "away_total_corners",
-        corners.away_total_corners,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "corners_over_7_5",
-        corners.over_7_5,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "corners_over_8_5",
-        corners.over_8_5,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "corners_over_9_5",
-        corners.over_9_5,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "corners_over_10_5",
-        corners.over_10_5,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "corners_over_11_5",
-        corners.over_11_5,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "corners_over_12_5",
-        corners.over_12_5,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "corners_over_13_5",
-        corners.over_13_5,
+        "total_corners_avg",
+        corners.total_avg,
         source,
     )
 
@@ -439,23 +335,7 @@ def map_soccerstats(
     _put(
         values,
         trace,
-        "home_ppg",
-        form.home_ppg,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "away_ppg",
-        form.away_ppg,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "home_points",
+        "home_form_points",
         form.home_points,
         source,
     )
@@ -463,7 +343,7 @@ def map_soccerstats(
     _put(
         values,
         trace,
-        "away_points",
+        "away_form_points",
         form.away_points,
         source,
     )
@@ -471,28 +351,36 @@ def map_soccerstats(
     _put(
         values,
         trace,
-        "home_matches",
-        form.home_matches,
+        "home_form_goals_for",
+        form.home_goals_for,
         source,
     )
 
     _put(
         values,
         trace,
-        "away_matches",
-        form.away_matches,
+        "home_form_goals_against",
+        form.home_goals_against,
+        source,
+    )
+
+    _put(
+        values,
+        trace,
+        "away_form_goals_for",
+        form.away_goals_for,
+        source,
+    )
+
+    _put(
+        values,
+        trace,
+        "away_form_goals_against",
+        form.away_goals_against,
         source,
     )
 
     # H2H -----------------------------------------------------------------
-
-    _put(
-        values,
-        trace,
-        "h2h_matches",
-        h2h.matches,
-        source,
-    )
 
     _put(
         values,
@@ -521,88 +409,16 @@ def map_soccerstats(
     _put(
         values,
         trace,
-        "h2h_home_goals",
-        h2h.home_goals,
+        "h2h_over_25_pct",
+        h2h.over_25_pct,
         source,
     )
 
     _put(
         values,
         trace,
-        "h2h_away_goals",
-        h2h.away_goals,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "h2h_home_goals_per_match",
-        h2h.home_goals_per_match,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "h2h_away_goals_per_match",
-        h2h.away_goals_per_match,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "h2h_total_goals_per_match",
-        h2h.total_goals_per_match,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "h2h_home_scored_rate",
-        h2h.home_scored_rate,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "h2h_away_scored_rate",
-        h2h.away_scored_rate,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "h2h_btts_rate",
-        h2h.btts_rate,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "h2h_over_1_5",
-        h2h.over_1_5,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "h2h_over_2_5",
-        h2h.over_2_5,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "h2h_over_3_5",
-        h2h.over_3_5,
+        "h2h_btts_pct",
+        h2h.btts_pct,
         source,
     )
 
@@ -611,48 +427,32 @@ def map_soccerstats(
     _put(
         values,
         trace,
-        "home_points_percentage",
-        distribution.home_points_percentage,
+        "home_clean_sheet_pct",
+        distribution.home_clean_sheet_pct,
         source,
     )
 
     _put(
         values,
         trace,
-        "away_points_percentage",
-        distribution.away_points_percentage,
+        "away_clean_sheet_pct",
+        distribution.away_clean_sheet_pct,
         source,
     )
 
     _put(
         values,
         trace,
-        "home_goals_percentage",
-        distribution.home_goals_percentage,
+        "home_failed_to_score_pct",
+        distribution.home_failed_to_score_pct,
         source,
     )
 
     _put(
         values,
         trace,
-        "away_goals_percentage",
-        distribution.away_goals_percentage,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "home_goals_conceded_percentage",
-        distribution.home_goals_conceded_percentage,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "away_goals_conceded_percentage",
-        distribution.away_goals_conceded_percentage,
+        "away_failed_to_score_pct",
+        distribution.away_failed_to_score_pct,
         source,
     )
 
@@ -661,32 +461,48 @@ def map_soccerstats(
     _put(
         values,
         trace,
-        "home_average_goal_minute_for",
-        timing.home_average_goal_minute_for,
+        "goal_0_15_pct",
+        timing.goal_0_15_pct,
         source,
     )
 
     _put(
         values,
         trace,
-        "away_average_goal_minute_for",
-        timing.away_average_goal_minute_for,
+        "goal_16_30_pct",
+        timing.goal_16_30_pct,
         source,
     )
 
     _put(
         values,
         trace,
-        "home_average_goal_minute_against",
-        timing.home_average_goal_minute_against,
+        "goal_31_45_pct",
+        timing.goal_31_45_pct,
         source,
     )
 
     _put(
         values,
         trace,
-        "away_average_goal_minute_against",
-        timing.away_average_goal_minute_against,
+        "goal_46_60_pct",
+        timing.goal_46_60_pct,
+        source,
+    )
+
+    _put(
+        values,
+        trace,
+        "goal_61_75_pct",
+        timing.goal_61_75_pct,
+        source,
+    )
+
+    _put(
+        values,
+        trace,
+        "goal_76_90_pct",
+        timing.goal_76_90_pct,
         source,
     )
 
@@ -707,32 +523,11 @@ def _map_statshub_team(
     warnings: list[str],
 ) -> None:
     """
-    Tek bir StatsHub HOME/AWAY kaynağını canonical alana aktarır.
+    StatsHub takım verisini canonical alanlara map eder.
 
-    StatsHub OCR yapısı:
-
-        goals_for
-        goals_agt
-        xg_for
-        xg_agt
-        ...
-
-    HOME kaynağı:
-
-        goals_for → home_gf_per_match
-        goals_agt → home_ga_per_match
-        xg_for    → home_xg
-        xg_agt    → home_xga
-
-    AWAY kaynağı:
-
-        goals_for → away_gf_per_match
-        goals_agt → away_ga_per_match
-        xg_for    → away_xg
-        xg_agt    → away_xga
-
-    Bu dönüşüm açık ve deterministic'tir.
-    Genel AVG değerleri takım değerine tahmin edilmez.
+    side:
+        home
+        away
     """
 
     if not isinstance(
@@ -748,103 +543,205 @@ def _map_statshub_team(
         "away",
     }:
         raise ValueError(
-            "side yalnızca home veya away olabilir."
+            "side 'home' veya 'away' olmalıdır."
         )
 
-    source_name = (
+    source = (
         "StatsHub HOME"
         if side == "home"
         else "StatsHub AWAY"
     )
 
-    prefix = (
-        "home"
-        if side == "home"
-        else "away"
-    )
+    prefix = f"{side}_"
 
-    # ------------------------------------------------------------------
-    # Preserve every approved OCR value under a source-specific key.
-    # ------------------------------------------------------------------
-
-    for key, value in data.values.items():
-        if value is None:
-            continue
-
-        namespaced_key = (
-            f"statshub_{side}_{key}"
-        )
-
-        _put(
-            values,
-            trace,
-            namespaced_key,
-            value,
-            source_name,
-        )
-
-    # ------------------------------------------------------------------
-    # Explicit goal mapping.
-    # ------------------------------------------------------------------
-
-    goal_for = data.values.get(
-        "goals_for"
-    )
-
-    goal_agt = data.values.get(
-        "goals_agt"
+    _put_if_missing(
+        values,
+        trace,
+        warnings,
+        f"{prefix}gf",
+        data.gf,
+        source,
+        priority_name="SoccerSTATS",
     )
 
     _put_if_missing(
         values,
         trace,
         warnings,
-        f"{prefix}_gf_per_match",
-        goal_for,
-        source_name,
-        priority_name="öncelikli statistics kaynağı",
+        f"{prefix}ga",
+        data.ga,
+        source,
+        priority_name="SoccerSTATS",
     )
 
     _put_if_missing(
         values,
         trace,
         warnings,
-        f"{prefix}_ga_per_match",
-        goal_agt,
-        source_name,
-        priority_name="öncelikli statistics kaynağı",
-    )
-
-    # ------------------------------------------------------------------
-    # Explicit xG mapping.
-    # ------------------------------------------------------------------
-
-    xg_for = data.values.get(
-        "xg_for"
-    )
-
-    xg_agt = data.values.get(
-        "xg_agt"
+        f"{prefix}gf_per_match",
+        data.gf_per_match,
+        source,
+        priority_name="SoccerSTATS",
     )
 
     _put_if_missing(
         values,
         trace,
         warnings,
-        f"{prefix}_xg",
-        xg_for,
-        source_name,
-        priority_name="öncelikli statistics kaynağı",
+        f"{prefix}ga_per_match",
+        data.ga_per_match,
+        source,
+        priority_name="SoccerSTATS",
     )
 
     _put_if_missing(
         values,
         trace,
         warnings,
-        f"{prefix}_xga",
-        xg_agt,
-        source_name,
-        priority_name="öncelikli statistics kaynağı",
+        f"{prefix}corners_avg",
+        data.corners_avg,
+        source,
+        priority_name="SoccerSTATS",
+    )
+
+    _put_if_missing(
+        values,
+        trace,
+        warnings,
+        f"{prefix}shots_on_target_avg",
+        data.shots_on_target_avg,
+        source,
+        priority_name="SoccerSTATS",
+    )
+
+    _put_if_missing(
+        values,
+        trace,
+        warnings,
+        f"{prefix}shots_in_box_avg",
+        data.shots_in_box_avg,
+        source,
+        priority_name="SoccerSTATS",
+    )
+
+    _put_if_missing(
+        values,
+        trace,
+        warnings,
+        f"{prefix}total_shots_avg",
+        data.total_shots_avg,
+        source,
+        priority_name="SoccerSTATS",
+    )
+
+    _put_if_missing(
+        values,
+        trace,
+        warnings,
+        f"{prefix}possession_avg",
+        data.possession_avg,
+        source,
+        priority_name="SoccerSTATS",
+    )
+
+    _put_if_missing(
+        values,
+        trace,
+        warnings,
+        f"{prefix}passes_avg",
+        data.passes_avg,
+        source,
+        priority_name="SoccerSTATS",
+    )
+
+    _put_if_missing(
+        values,
+        trace,
+        warnings,
+        f"{prefix}touches_opp_box_avg",
+        data.touches_opp_box_avg,
+        source,
+        priority_name="SoccerSTATS",
+    )
+
+    _put_if_missing(
+        values,
+        trace,
+        warnings,
+        f"{prefix}big_chance_created_avg",
+        data.big_chance_created_avg,
+        source,
+        priority_name="SoccerSTATS",
+    )
+
+    _put_if_missing(
+        values,
+        trace,
+        warnings,
+        f"{prefix}big_chance_scored_avg",
+        data.big_chance_scored_avg,
+        source,
+        priority_name="SoccerSTATS",
+    )
+
+    _put_if_missing(
+        values,
+        trace,
+        warnings,
+        f"{prefix}big_chance_missed_avg",
+        data.big_chance_missed_avg,
+        source,
+        priority_name="SoccerSTATS",
+    )
+
+    _put_if_missing(
+        values,
+        trace,
+        warnings,
+        f"{prefix}xg",
+        data.xg,
+        source,
+        priority_name="SoccerSTATS",
+    )
+
+    _put_if_missing(
+        values,
+        trace,
+        warnings,
+        f"{prefix}xga",
+        data.xga,
+        source,
+        priority_name="SoccerSTATS",
+    )
+
+    _put_if_missing(
+        values,
+        trace,
+        warnings,
+        f"{prefix}cards_avg",
+        data.cards_avg,
+        source,
+        priority_name="SoccerSTATS",
+    )
+
+    _put_if_missing(
+        values,
+        trace,
+        warnings,
+        f"{prefix}fouls_avg",
+        data.fouls_avg,
+        source,
+        priority_name="SoccerSTATS",
+    )
+
+    _put_if_missing(
+        values,
+        trace,
+        warnings,
+        f"{prefix}offsides_avg",
+        data.offsides_avg,
+        source,
+        priority_name="SoccerSTATS",
     )
 
 
@@ -855,32 +752,191 @@ def _map_legacy_statshub(
     warnings: list[str],
 ) -> None:
     """
-    Eski tek StatsHub girişini destekler.
+    Eski tek StatsHub API'sini canonical alanlara map eder.
 
     ÖNEMLİ:
 
-    Genel AVG değerleri home/away tarafına tahmin edilmez.
+    Genel StatsHub AVG değerlerinden HOME/AWAY takım
+    değerleri tahmin edilmez.
 
-    Yalnızca açıkça canonical isimlendirilmiş alanlar
-    canonical modele aktarılır.
+    Örneğin:
+
+        Goals AVG = 3.05
+
+    değerinden:
+
+        home_gf = 1.525
+        away_gf = 1.525
+
+    gibi yapay bir dağılım oluşturulmaz.
+
+    Yalnızca açıkça takım bazında bulunan alanlar kullanılır.
     """
+
+    if not isinstance(
+        data,
+        StatsHubData,
+    ):
+        raise TypeError(
+            "data StatsHubData olmalıdır."
+        )
 
     source = "StatsHub"
 
-    for key, value in data.values.items():
+    # Legacy source fields are only accepted when they are
+    # explicitly represented by the data model.
 
-        if value is None:
-            continue
+    _put(
+        values,
+        trace,
+        "statshub_gf",
+        data.gf,
+        source,
+    )
 
-        if key not in values:
-            values[key] = value
-            trace[key] = source
-            continue
+    _put(
+        values,
+        trace,
+        "statshub_ga",
+        data.ga,
+        source,
+    )
 
-        warnings.append(
-            f"{key}: SoccerSTATS öncelikli; "
-            "StatsHub değeri kullanılmadı."
-        )
+    _put(
+        values,
+        trace,
+        "statshub_gf_per_match",
+        data.gf_per_match,
+        source,
+    )
+
+    _put(
+        values,
+        trace,
+        "statshub_ga_per_match",
+        data.ga_per_match,
+        source,
+    )
+
+    _put(
+        values,
+        trace,
+        "statshub_corners_avg",
+        data.corners_avg,
+        source,
+    )
+
+    _put(
+        values,
+        trace,
+        "statshub_shots_on_target_avg",
+        data.shots_on_target_avg,
+        source,
+    )
+
+    _put(
+        values,
+        trace,
+        "statshub_shots_in_box_avg",
+        data.shots_in_box_avg,
+        source,
+    )
+
+    _put(
+        values,
+        trace,
+        "statshub_total_shots_avg",
+        data.total_shots_avg,
+        source,
+    )
+
+    _put(
+        values,
+        trace,
+        "statshub_possession_avg",
+        data.possession_avg,
+        source,
+    )
+
+    _put(
+        values,
+        trace,
+        "statshub_passes_avg",
+        data.passes_avg,
+        source,
+    )
+
+    _put(
+        values,
+        trace,
+        "statshub_touches_opp_box_avg",
+        data.touches_opp_box_avg,
+        source,
+    )
+
+    _put(
+        values,
+        trace,
+        "statshub_big_chance_created_avg",
+        data.big_chance_created_avg,
+        source,
+    )
+
+    _put(
+        values,
+        trace,
+        "statshub_big_chance_scored_avg",
+        data.big_chance_scored_avg,
+        source,
+    )
+
+    _put(
+        values,
+        trace,
+        "statshub_big_chance_missed_avg",
+        data.big_chance_missed_avg,
+        source,
+    )
+
+    _put(
+        values,
+        trace,
+        "statshub_xg",
+        data.xg,
+        source,
+    )
+
+    _put(
+        values,
+        trace,
+        "statshub_xga",
+        data.xga,
+        source,
+    )
+
+    _put(
+        values,
+        trace,
+        "statshub_cards_avg",
+        data.cards_avg,
+        source,
+    )
+
+    _put(
+        values,
+        trace,
+        "statshub_fouls_avg",
+        data.fouls_avg,
+        source,
+    )
+
+    _put(
+        values,
+        trace,
+        "statshub_offsides_avg",
+        data.offsides_avg,
+        source,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -894,10 +950,16 @@ def _map_ppi(
     trace: dict[str, str],
 ) -> None:
     """
-    PPI verisini canonical context alanlarına aktarır.
-
-    PPI lambda hesabına otomatik ağırlık olarak sokulmaz.
+    PPI verisini canonical context alanlarına map eder.
     """
+
+    if not isinstance(
+        data,
+        PPIData,
+    ):
+        raise TypeError(
+            "data PPIData olmalıdır."
+        )
 
     source = "PPI"
 
@@ -905,22 +967,6 @@ def _map_ppi(
         values,
         trace,
         "ppi_home_ppg",
-        data.home_ppg,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "ppi_away_ppg",
-        data.away_ppg,
-        source,
-    )
-
-    _put(
-        values,
-        trace,
-        "ppi_home_ppi",
         data.home_ppi,
         source,
     )
@@ -928,7 +974,7 @@ def _map_ppi(
     _put(
         values,
         trace,
-        "ppi_away_ppi",
+        "ppi_away_ppg",
         data.away_ppi,
         source,
     )
@@ -1235,24 +1281,49 @@ def map_sources(
                 "aynı anda kullanılamaz."
             )
 
-        # Eski davranışı koruyoruz.
-        result = map_five_sources(
-            soccerstats=soccerstats,
-            ppi=ppi,
-            odds=odds,
-        )
+        # Eski tek StatsHub API'si için doğrudan legacy path kullanılır.
+        # Böylece yalnızca StatsHub verisiyle çalışan mevcut pipeline ve
+        # testler korunur; map_five_sources()'un five-source guard'ına
+        # yanlışlıkla girilmez.
+        match = statshub.match
 
-        values = dict(
-            result.canonical_values
-        )
+        if match is None:
+            raise ValueError(
+                "StatsHub match bilgisi gereklidir."
+            )
 
-        trace = dict(
-            result.source_trace
-        )
+        if soccerstats is not None:
+            _validate_match_pair(
+                match,
+                soccerstats.match,
+                "SoccerSTATS",
+            )
 
-        warnings = list(
-            result.warnings
-        )
+        if ppi is not None and ppi.match is not None:
+            _validate_match_pair(
+                match,
+                ppi.match,
+                "PPI",
+            )
+
+        if odds is not None and odds.match is not None:
+            _validate_match_pair(
+                match,
+                odds.match,
+                "Odds",
+            )
+
+        values: dict[str, Any] = {}
+        trace: dict[str, str] = {}
+        warnings: list[str] = []
+
+        if soccerstats is not None:
+            soccer_values, soccer_trace = map_soccerstats(
+                soccerstats
+            )
+
+            values.update(soccer_values)
+            trace.update(soccer_trace)
 
         _map_legacy_statshub(
             statshub,
@@ -1261,17 +1332,35 @@ def map_sources(
             warnings,
         )
 
+        if ppi is not None:
+            _map_ppi(
+                ppi,
+                values,
+                trace,
+            )
+
         return CanonicalMatchData(
-            match=result.match,
-            soccerstats=result.soccerstats,
+            match=match,
+            soccerstats=soccerstats,
             statshub=statshub,
-            odds=result.odds,
+            odds=odds,
             statshub_home=None,
             statshub_away=None,
-            ppi=result.ppi,
+            ppi=ppi,
             canonical_values=values,
             source_trace=trace,
             warnings=warnings,
+        )
+
+    if (
+        soccerstats is None
+        and statshub_home is None
+        and statshub_away is None
+        and ppi is None
+        and odds is None
+    ):
+        raise ValueError(
+            "En az bir statistics source verilmelidir."
         )
 
     return map_five_sources(
@@ -1288,4 +1377,4 @@ __all__ = [
     "map_soccerstats",
     "map_five_sources",
     "map_sources",
-]
+        ]
