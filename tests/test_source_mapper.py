@@ -53,19 +53,36 @@ def make_soccerstats():
 def test_source_mapper_version():
     assert (
         SOURCE_MAPPER_VERSION
-        == "Q200-SOURCE-MAPPER-V1"
+        == "Q200-SOURCE-MAPPER-V2"
     )
 
 
 def test_map_soccerstats_creates_canonical_fields():
     data = make_soccerstats()
 
-    values, trace = map_soccerstats(data)
+    values, trace = map_soccerstats(
+        data
+    )
 
-    assert values["home_gf"] == 2.0
-    assert values["home_ga"] == 0.0
-    assert values["away_gf"] == 0.0
-    assert values["away_ga"] == 4.0
+    assert (
+        values["home_gf"]
+        == 2.0
+    )
+
+    assert (
+        values["home_ga"]
+        == 0.0
+    )
+
+    assert (
+        values["away_gf"]
+        == 0.0
+    )
+
+    assert (
+        values["away_ga"]
+        == 4.0
+    )
 
     assert (
         values["home_gf_per_match"]
@@ -97,8 +114,15 @@ def test_map_soccerstats_creates_canonical_fields():
         == 3.0
     )
 
-    assert values["home_ppg"] == 3.0
-    assert values["away_ppg"] == 0.0
+    assert (
+        values["home_ppg"]
+        == 3.0
+    )
+
+    assert (
+        values["away_ppg"]
+        == 0.0
+    )
 
     assert (
         trace["home_gf_per_match"]
@@ -122,15 +146,24 @@ def test_none_values_are_not_inserted():
         ),
     )
 
-    values, trace = map_soccerstats(data)
+    values, trace = map_soccerstats(
+        data
+    )
 
     assert (
         values["home_gf_per_match"]
         == 1.2
     )
 
-    assert "away_gf_per_match" not in values
-    assert "away_gf_per_match" not in trace
+    assert (
+        "away_gf_per_match"
+        not in values
+    )
+
+    assert (
+        "away_gf_per_match"
+        not in trace
+    )
 
 
 def test_stats_hub_fills_missing_soccerstats_fields():
@@ -168,22 +201,30 @@ def test_stats_hub_fills_missing_soccerstats_fields():
     )
 
     assert (
-        result.canonical_values["shots"]
+        result.canonical_values[
+            "shots"
+        ]
         == 25.0
     )
 
     assert (
-        result.canonical_values["possession"]
+        result.canonical_values[
+            "possession"
+        ]
         == 55.0
     )
 
     assert (
-        result.source_trace["shots"]
+        result.source_trace[
+            "shots"
+        ]
         == "StatsHub"
     )
 
     assert (
-        result.source_trace["possession"]
+        result.source_trace[
+            "possession"
+        ]
         == "StatsHub"
     )
 
@@ -222,7 +263,8 @@ def test_soccerstats_has_priority_over_statshub():
     )
 
     assert any(
-        "home_gf_per_match" in warning
+        "home_gf_per_match"
+        in warning
         for warning in result.warnings
     )
 
@@ -250,16 +292,27 @@ def test_stats_hub_can_be_used_alone():
         statshub=statshub,
     )
 
-    assert result.match.home_team == "A"
-    assert result.match.away_team == "B"
+    assert (
+        result.match.home_team
+        == "A"
+    )
 
     assert (
-        result.canonical_values["shots"]
+        result.match.away_team
+        == "B"
+    )
+
+    assert (
+        result.canonical_values[
+            "shots"
+        ]
         == 30.0
     )
 
     assert (
-        result.source_trace["shots"]
+        result.source_trace[
+            "shots"
+        ]
         == "StatsHub"
     )
 
