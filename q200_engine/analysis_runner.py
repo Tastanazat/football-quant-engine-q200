@@ -5,71 +5,46 @@ Q200 V3.1
 
 Amaç
 -----
+FiveSourceMatchInput üzerinden Q200 analizini
+tek bir giriş noktasıyla çalıştırmak.
 
-Q200 analizleri için tek bir üst seviye giriş noktası
-sağlamak.
-
-Desteklenen girişler:
-
-1. TeamStats
-2. FiveSourceMatchInput
-
-TeamStats akışı:
-
-TeamStats
-    ↓
-Q200Pipeline
-    ↓
-MODEL
-    ↓
-MODEL LOCK
-    ↓
-STRESS TEST
-    ↓
-ODDS
-    ↓
-NO-VIG
-    ↓
-FAIR ODDS
-    ↓
-BASELINE EV
-    ↓
-PESSIMISTIC EV
-    ↓
-SELECTION
-    ↓
-KELLY
-
-Five Source akışı:
+Akış:
 
 FiveSourceMatchInput
-    ↓
-Five Source Pipeline
-    ↓
-CanonicalMatchData
-    ↓
-Validation
-    ↓
-TeamStats
-    ↓
+        ↓
+Source Mapper
+        ↓
+Canonical / TeamStats
+        ↓
 Q200Pipeline
-    ↓
+        ↓
+MODEL
+        ↓
 MODEL LOCK
-    ↓
-ODDS ANALYSIS
+        ↓
+STRESS TEST
+        ↓
+ODDS
+        ↓
+NO-VIG
+        ↓
+FAIR ODDS
+        ↓
+BASELINE EV
+        ↓
+PESSIMISTIC EV
+        ↓
+SELECTION
+        ↓
+KELLY
 
 KRİTİK KURAL
 ------------
-
 Bu katman model hesaplamaz.
 
 Model hesaplama Q200Pipeline tarafından yapılır.
 
-Five Source dönüşümü five_source_pipeline tarafından yapılır.
-
 Odds model oluşturulmadan önce kullanılmaz.
-
-Odds modeli değiştiremez.
 """
 
 from __future__ import annotations
@@ -84,20 +59,9 @@ from .schema import (
     AnalysisResult,
     TeamStats,
 )
-from .five_source_pipeline import (
-    run_five_source_analysis,
-)
-from .ingestion.models import (
-    FiveSourceMatchInput,
-)
 
 
 RUNNER_VERSION = "Q200-ANALYSIS-RUNNER-V2"
-
-
-# =========================================================
-# RESULT
-# =========================================================
 
 
 @dataclass(frozen=True)
@@ -116,11 +80,6 @@ class AnalysisRun:
     metadata: dict[str, Any]
 
 
-# =========================================================
-# VALIDATION HELPERS
-# =========================================================
-
-
 def _validate_bankroll(
     bankroll: float,
 ) -> float:
@@ -130,15 +89,12 @@ def _validate_bankroll(
 
     try:
         value = float(bankroll)
-
     except (TypeError, ValueError) as exc:
-
         raise ValueError(
             "bankroll sayısal olmalıdır."
         ) from exc
 
     if value <= 0:
-
         raise ValueError(
             "bankroll pozitif olmalıdır."
         )
@@ -162,13 +118,11 @@ def _validate_odds(
         odds,
         dict,
     ):
-
         raise TypeError(
             "odds dictionary olmalıdır."
         )
 
     if not odds:
-
         raise ValueError(
             "odds boş olamaz."
         )
@@ -182,20 +136,16 @@ def _validate_odds(
         ).upper()
 
         try:
-
             value = float(
                 odd
             )
-
         except (TypeError, ValueError) as exc:
-
             raise ValueError(
                 f"Geçersiz odds: "
                 f"{outcome}={odd}"
             ) from exc
 
         if value <= 1.0:
-
             raise ValueError(
                 f"Odds 1.0'dan büyük "
                 f"olmalıdır: {outcome}"
@@ -206,29 +156,6 @@ def _validate_odds(
     return normalized
 
 
-def _validate_five_source_input(
-    data: FiveSourceMatchInput,
-) -> None:
-    """
-    FiveSourceMatchInput tipini doğrular.
-    """
-
-    if not isinstance(
-        data,
-        FiveSourceMatchInput,
-    ):
-
-        raise TypeError(
-            "data FiveSourceMatchInput "
-            "olmalıdır."
-        )
-
-
-# =========================================================
-# TEAMSTATS ANALYSIS
-# =========================================================
-
-
 def run_analysis(
     *,
     stats: TeamStats,
@@ -237,22 +164,37 @@ def run_analysis(
     uncertainty: str = "MEDIUM",
 ) -> AnalysisRun:
     """
-    Q200 V3.1 TeamStats tabanlı tam analiz çalıştırıcısı.
+    Q200 V3.1 tam analiz çalıştırıcısı.
 
-    Model önce oluşturulur.
+    Parameters
+    ----------
+    stats:
+        Model oluşturmak için TeamStats.
 
-    Pipeline modeli LOCK eder.
+    odds:
+        Analiz edilecek gerçek market odds'ları.
 
-    Daha sonra odds analizi yapılır.
+    bankroll:
+        Kelly / selection hesabında kullanılacak bankroll.
 
-    Odds model oluşturma aşamasına girmez.
+    uncertainty:
+        Q200 uncertainty seviyesi.
+
+    Returns
+    -------
+    AnalysisRun
+        Q200 AnalysisResult ve metadata.
+
+    KRİTİK:
+        Model önce oluşturulur.
+        Pipeline içinde LOCK edilir.
+        Daha sonra odds analizi yapılır.
     """
 
     if not isinstance(
         stats,
         TeamStats,
     ):
-
         raise TypeError(
             "stats TeamStats olmalıdır."
         )
@@ -272,7 +214,6 @@ def run_analysis(
     )
 
     if not pipeline.model_locked:
-
         raise RuntimeError(
             "Q200 modeli LOCK edilmedi."
         )
@@ -284,7 +225,6 @@ def run_analysis(
     )
 
     if not result.snapshot.locked:
-
         raise RuntimeError(
             "Analiz sonucu LOCK edilmiş "
             "model içermiyor."
@@ -297,17 +237,11 @@ def run_analysis(
             "pipeline_version": (
                 pipeline.VERSION
             ),
-            "input_type": "TeamStats",
             "model_locked": True,
             "odds_used_after_model_lock": True,
             "uncertainty": uncertainty,
         },
     )
-
-
-# =========================================================
-# EXISTING PIPELINE ANALYSIS
-# =========================================================
 
 
 def run_from_pipeline(
@@ -321,27 +255,23 @@ def run_from_pipeline(
     Önceden oluşturulmuş Q200Pipeline üzerinden
     analiz çalıştırır.
 
-    Pipeline'ın mevcut snapshot'ı korunur.
+    Bu fonksiyon özellikle test ve üst seviye
+    entegrasyonlar için kullanılır.
 
-    Özellikle test ve üst seviye entegrasyonlarda
-    kullanılabilir.
+    Pipeline'ın mevcut snapshot'ı korunur.
     """
 
     if not isinstance(
         pipeline,
         Q200Pipeline,
     ):
-
         raise TypeError(
-            "pipeline Q200Pipeline "
-            "olmalıdır."
+            "pipeline Q200Pipeline olmalıdır."
         )
 
     if not pipeline.model_locked:
-
         raise RuntimeError(
-            "Pipeline modeli "
-            "LOCK edilmemiş."
+            "Pipeline modeli LOCK edilmemiş."
         )
 
     normalized_odds = _validate_odds(
@@ -365,14 +295,12 @@ def run_from_pipeline(
     )
 
     if pipeline.snapshot != snapshot_before:
-
         raise RuntimeError(
-            "Analiz sırasında model "
-            "snapshot değişti."
+            "Analiz sırasında model snapshot "
+            "değişti."
         )
 
     if not result.snapshot.locked:
-
         raise RuntimeError(
             "Analiz sonucu LOCK edilmiş "
             "model içermiyor."
@@ -385,7 +313,6 @@ def run_from_pipeline(
             "pipeline_version": (
                 pipeline.VERSION
             ),
-            "input_type": "ExistingPipeline",
             "model_locked": True,
             "odds_used_after_model_lock": True,
             "uncertainty": uncertainty,
@@ -394,185 +321,9 @@ def run_from_pipeline(
     )
 
 
-# =========================================================
-# FIVE SOURCE ANALYSIS
-# =========================================================
-
-
-def run_five_source(
-    *,
-    data: FiveSourceMatchInput,
-    bankroll: float,
-    market: str = "1X2",
-    uncertainty: str = "MEDIUM",
-) -> AnalysisRun:
-    """
-    FiveSourceMatchInput üzerinden tam Q200 analizini
-    çalıştırır.
-
-    Bu fonksiyon Five Source mantığını yeniden yazmaz.
-
-    Mevcut:
-
-        five_source_pipeline.run_five_source_analysis
-
-    fonksiyonunu kullanır.
-
-    Akış:
-
-        StatsHub HOME
-        StatsHub AWAY
-        SoccerSTATS
-        PPI
-        Odds
-             ↓
-        FiveSourceMatchInput
-             ↓
-        Five Source Pipeline
-             ↓
-        CanonicalMatchData
-             ↓
-        TeamStats
-             ↓
-        Q200 Model
-             ↓
-        MODEL LOCK
-             ↓
-        Odds Analysis
-    """
-
-    _validate_five_source_input(
-        data
-    )
-
-    validated_bankroll = (
-        _validate_bankroll(
-            bankroll
-        )
-    )
-
-    result = run_five_source_analysis(
-        data,
-        market=market,
-        bankroll=validated_bankroll,
-        uncertainty=uncertainty,
-    )
-
-    if not result.snapshot.locked:
-
-        raise RuntimeError(
-            "Five Source analizi LOCK edilmiş "
-            "model içermiyor."
-        )
-
-    return AnalysisRun(
-        result=result,
-        metadata={
-            "runner_version": RUNNER_VERSION,
-            "pipeline_version": (
-                "Q200-FIVE-SOURCE-PIPELINE-V1"
-            ),
-            "input_type": (
-                "FiveSourceMatchInput"
-            ),
-            "market": market,
-            "model_locked": True,
-            "odds_used_after_model_lock": True,
-            "uncertainty": uncertainty,
-            "five_source": True,
-        },
-    )
-
-
-# =========================================================
-# GENERIC ENTRY POINT
-# =========================================================
-
-
-def run(
-    *,
-    stats: TeamStats | None = None,
-    five_source_data: FiveSourceMatchInput | None = None,
-    odds: dict[str, float] | None = None,
-    bankroll: float,
-    uncertainty: str = "MEDIUM",
-    market: str = "1X2",
-) -> AnalysisRun:
-    """
-    Q200 için birleşik üst seviye giriş noktası.
-
-    İki giriş desteklenir:
-
-    1. TeamStats + odds
-    2. FiveSourceMatchInput
-
-    Aynı anda iki farklı input verilmesine izin verilmez.
-    """
-
-    has_stats = (
-        stats is not None
-    )
-
-    has_five_source = (
-        five_source_data is not None
-    )
-
-    if has_stats and has_five_source:
-
-        raise ValueError(
-            "stats ve five_source_data "
-            "aynı anda kullanılamaz."
-        )
-
-    if not has_stats and not has_five_source:
-
-        raise ValueError(
-            "stats veya five_source_data "
-            "verilmelidir."
-        )
-
-    # -----------------------------------------------------
-    # Five Source
-    # -----------------------------------------------------
-
-    if has_five_source:
-
-        return run_five_source(
-            data=five_source_data,
-            bankroll=bankroll,
-            market=market,
-            uncertainty=uncertainty,
-        )
-
-    # -----------------------------------------------------
-    # TeamStats
-    # -----------------------------------------------------
-
-    if odds is None:
-
-        raise ValueError(
-            "TeamStats analizi için "
-            "odds gereklidir."
-        )
-
-    return run_analysis(
-        stats=stats,
-        odds=odds,
-        bankroll=bankroll,
-        uncertainty=uncertainty,
-    )
-
-
-# =========================================================
-# EXPORTS
-# =========================================================
-
-
 __all__ = [
     "RUNNER_VERSION",
     "AnalysisRun",
     "run_analysis",
     "run_from_pipeline",
-    "run_five_source",
-    "run",
 ]
