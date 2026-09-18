@@ -6,6 +6,8 @@ Q200 V3.1
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from q200_engine.analysis_runner import (
@@ -55,7 +57,7 @@ def make_odds() -> dict[str, float]:
 def test_runner_version() -> None:
     assert (
         RUNNER_VERSION
-        == "Q200-ANALYSIS-RUNNER-V1"
+        == "Q200-ANALYSIS-RUNNER-V2"
     )
 
 
@@ -242,7 +244,15 @@ def test_unlocked_pipeline_is_rejected() -> None:
         make_stats()
     )
 
-    pipeline.snapshot.locked = False
+    pipeline.snapshot = replace(
+        pipeline.snapshot,
+        locked=False,
+    )
+
+    assert (
+        pipeline.snapshot.locked
+        is False
+    )
 
     with pytest.raises(RuntimeError):
         run_from_pipeline(
