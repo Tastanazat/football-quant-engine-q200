@@ -168,6 +168,20 @@ from .feature_selection import (
     feature_selection_summary,
 )
 
+from .five_source_loader import (
+    FIVE_SOURCE_LOADER_VERSION,
+    load_statshub_image,
+    load_statshub_text,
+    load_ppi_pdf,
+    build_five_source_input,
+)
+
+from .five_source_pipeline import (
+    FIVE_SOURCE_PIPELINE_VERSION,
+    build_locked_model_from_five_sources,
+    run_five_source_analysis,
+)
+
 from .dataset_backtest import (
     DATASET_BACKTEST_VERSION,
     DatasetBacktestItem,
@@ -298,6 +312,16 @@ __all__ = [
     "selected_feature_names",
     "feature_selection_to_dict",
     "feature_selection_summary",
+
+    "FIVE_SOURCE_LOADER_VERSION",
+    "load_statshub_image",
+    "load_statshub_text",
+    "load_ppi_pdf",
+    "build_five_source_input",
+
+    "FIVE_SOURCE_PIPELINE_VERSION",
+    "build_locked_model_from_five_sources",
+    "run_five_source_analysis",
 
     "DATASET_BACKTEST_VERSION",
     "DatasetBacktestItem",
