@@ -13,32 +13,20 @@ Validation
         ↓
 Validated Canonical Data
 
-Desteklenen kaynaklar:
-
-1. StatsHub HOME
-2. StatsHub AWAY
-3. SoccerSTATS
-4. PPI
-5. Odds
-
 Bu katman:
-- Kaynakları canonical yapıya dönüştürür.
+- SoccerSTATS ve StatsHub verilerini birleştirir.
+- Mevcut Source Mapper önceliklerini korur.
 - Canonical veriyi validate eder.
-- Validation sonucunu taşır.
-- 5 kaynaklı akışı destekler.
+- Validation sonucunu taşıyan tek bir çıktı üretir.
 
 Bu katman:
 - Lambda hesaplamaz.
 - Poisson hesaplamaz.
 - Monte Carlo çalıştırmaz.
-- Odds'u model oluşturma aşamasına sokmaz.
+- Odds kullanmaz.
 - Selection yapmaz.
 - Kelly hesaplamaz.
 - Model parametrelerini değiştirmez.
-
-Backward compatibility:
-- Eski map_and_validate() API korunur.
-- Yeni map_and_validate_five_sources() eklenir.
 """
 
 from __future__ import annotations
@@ -53,19 +41,14 @@ from .data_validator import (
 )
 from .models import (
     CanonicalMatchData,
-    OddsData,
-    PPIData,
     SoccerStatsData,
     StatsHubData,
 )
-from .source_mapper import (
-    map_five_sources,
-    map_sources,
-)
+from .source_mapper import map_sources
 
 
 VALIDATED_INGESTION_VERSION = (
-    "Q200-VALIDATED-INGESTION-V2"
+    "Q200-VALIDATED-INGESTION-V1"
 )
 
 
@@ -104,50 +87,6 @@ class ValidatedCanonicalData:
         return self.canonical.warnings
 
 
-def _validate_required_fields(
-    required_fields: tuple[str, ...],
-) -> None:
-    """
-    required_fields sözleşmesini kontrol eder.
-    """
-
-    if not isinstance(
-        required_fields,
-        tuple,
-    ):
-        raise TypeError(
-            "required_fields tuple olmalıdır."
-        )
-
-    if not all(
-        isinstance(field, str)
-        for field in required_fields
-    ):
-        raise TypeError(
-            "required_fields içindeki alan adları "
-            "string olmalıdır."
-        )
-
-
-def _validate_canonical(
-    canonical: CanonicalMatchData,
-    required_fields: tuple[str, ...],
-) -> ValidatedCanonicalData:
-    """
-    CanonicalMatchData üzerinde validation çalıştırır.
-    """
-
-    validation = validate_canonical_data(
-        canonical,
-        required_fields=required_fields,
-    )
-
-    return ValidatedCanonicalData(
-        canonical=canonical,
-        validation=validation,
-    )
-
-
 def map_and_validate(
     *,
     soccerstats: SoccerStatsData | None = None,
@@ -157,22 +96,20 @@ def map_and_validate(
     ),
 ) -> ValidatedCanonicalData:
     """
-    Eski tek StatsHub API'si için backward-compatible
-    validation pipeline.
+    External source'ları canonical veriye dönüştürür
+    ve validation uygular.
 
-    Akış:
+    ÖNEMLİ:
 
-        SoccerSTATS
-             +
-        StatsHub
-             ↓
-        map_sources()
-             ↓
-        CanonicalMatchData
-             ↓
-        Validation
+    Validation başarısız olsa bile ham canonical veri
+    silinmez.
 
-    Bu fonksiyon korunmuştur.
+    Sonuç:
+        result.canonical
+        result.validation
+
+    üzerinden hem veri hem de validation problemi
+    birlikte görülebilir.
     """
 
     if (
@@ -184,98 +121,27 @@ def map_and_validate(
             "verilmelidir."
         )
 
-    _validate_required_fields(
-        required_fields
-    )
+    if not isinstance(
+        required_fields,
+        tuple,
+    ):
+        raise TypeError(
+            "required_fields tuple olmalıdır."
+        )
 
     canonical = map_sources(
         soccerstats=soccerstats,
         statshub=statshub,
     )
 
-    return _validate_canonical(
+    validation = validate_canonical_data(
         canonical,
-        required_fields,
+        required_fields=required_fields,
     )
 
-
-def map_and_validate_five_sources(
-    *,
-    soccerstats: SoccerStatsData | None = None,
-    statshub_home: StatsHubData | None = None,
-    statshub_away: StatsHubData | None = None,
-    ppi: PPIData | None = None,
-    odds: OddsData | None = None,
-    required_fields: tuple[str, ...] = (
-        DEFAULT_REQUIRED_FIELDS
-    ),
-) -> ValidatedCanonicalData:
-    """
-    Q200 V3.1 beş kaynaklı validation pipeline.
-
-    Kaynaklar:
-
-        1. StatsHub HOME
-        2. StatsHub AWAY
-        3. SoccerSTATS
-        4. PPI
-        5. Odds
-
-    Akış:
-
-        Five Sources
-             ↓
-        map_five_sources()
-             ↓
-        CanonicalMatchData
-             ↓
-        Validation
-             ↓
-        ValidatedCanonicalData
-
-    ÖNEMLİ:
-
-    Odds CanonicalMatchData.odds içinde tutulur.
-
-    Odds değerleri canonical_values içine yazılmaz
-    ve model oluşturma aşamasında kullanılmaz.
-
-    PPI context olarak korunur.
-
-    Validation başarısızsa canonical veri silinmez;
-    result.valid False olur ve require_valid()
-    sonraki model aşamasını engeller.
-    """
-
-    if all(
-        source is None
-        for source in (
-            soccerstats,
-            statshub_home,
-            statshub_away,
-            ppi,
-            odds,
-        )
-    ):
-        raise ValueError(
-            "En az bir source verilmelidir."
-        )
-
-    _validate_required_fields(
-        required_fields
-    )
-
-    canonical = map_five_sources(
-        soccerstats=soccerstats,
-        statshub_home=statshub_home,
-        statshub_away=statshub_away,
-        ppi=ppi,
-        odds=odds,
-    )
-
-    return _validate_canonical(
-        canonical,
-        required_fields,
+    return ValidatedCanonicalData(
+        canonical=canonical,
+        validation=validation,
     )
 
 
@@ -429,7 +295,6 @@ __all__ = [
     "VALIDATED_INGESTION_VERSION",
     "ValidatedCanonicalData",
     "map_and_validate",
-    "map_and_validate_five_sources",
     "require_valid",
     "validated_pipeline_to_dict",
 ]
