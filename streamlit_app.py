@@ -1889,7 +1889,7 @@ if run_button:
 
         # -------------------------------------------------
         # MATCH CHECKS
-        # -------------------------------------------------
+        # -----------------------------------------------------
 
         if soccerstats.match is not None:
 
@@ -2127,4 +2127,4 @@ st.divider()
 st.caption(
     "Q200 V3.1 | Five Source | "
     "Model Lock | History | Settlement | Evaluation"
-)
+                    )
