@@ -4,9 +4,11 @@ Q200 Engine - Ingestion Models
 Q200 V3.1
 
 External data sources:
-    SoccerSTATS PDF
-    StatsHub OCR
-    Odds PDF
+    1. StatsHub HOME
+    2. StatsHub AWAY
+    3. SoccerSTATS
+    4. PPI
+    5. Odds
 
 Bu katman yalnızca veriyi taşır.
 Model, lambda, odds veya selection hesabı yapmaz.
@@ -18,7 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 
-INGESTION_VERSION = "Q200-INGESTION-V1"
+INGESTION_VERSION = "Q200-INGESTION-V2"
 
 
 @dataclass(frozen=True)
@@ -205,13 +207,47 @@ class StatsHubData:
 
 
 @dataclass(frozen=True)
+class PPIData:
+    """
+    Points Performance Index verisi.
+
+    PPI modelin lambda hesabını doğrudan değiştirmez.
+    Bu katman yalnızca veriyi taşır.
+
+    Daha sonraki aşamada:
+        PPI -> feature -> calibration/backtest
+    katkısı ayrı olarak ölçülebilir.
+    """
+
+    match: Optional[MatchInfo] = None
+
+    home_ppg: Optional[float] = None
+    away_ppg: Optional[float] = None
+
+    home_ppi: Optional[float] = None
+    away_ppi: Optional[float] = None
+
+    home_opponent_ppg: Optional[float] = None
+    away_opponent_ppg: Optional[float] = None
+
+    home_rank: Optional[int] = None
+    away_rank: Optional[int] = None
+
+    raw_text: Optional[str] = None
+    source_metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class OddsData:
     """
     Odds kaynağından gelen veriler.
 
     ÖNEMLİ:
     Bu yapı model/lambda hesabına girmez.
-    Odds yalnızca model LOCK sonrasında kullanılacaktır.
+
+    Odds yalnızca:
+        MODEL LOCK
+    sonrasında kullanılacaktır.
     """
 
     match: Optional[MatchInfo] = None
@@ -221,12 +257,98 @@ class OddsData:
 
 
 @dataclass(frozen=True)
+class FiveSourceMatchInput:
+    """
+    Q200 V3.1 beş kaynaklı analiz girdisi.
+
+    Kaynaklar:
+
+        1. StatsHub HOME
+        2. StatsHub AWAY
+        3. SoccerSTATS
+        4. PPI
+        5. Odds
+
+    Bu sınıf yalnızca veri taşıma sözleşmesidir.
+
+    Burada:
+        - lambda hesaplanmaz
+        - probability hesaplanmaz
+        - odds model içine sokulmaz
+        - EV hesaplanmaz
+        - Kelly hesaplanmaz
+        - selection yapılmaz
+    """
+
+    match: MatchInfo
+
+    statshub_home: Optional[StatsHubData] = None
+    statshub_away: Optional[StatsHubData] = None
+
+    soccerstats: Optional[SoccerStatsData] = None
+    ppi: Optional[PPIData] = None
+    odds: Optional[OddsData] = None
+
+    source_metadata: Dict[str, Any] = field(default_factory=dict)
+    warnings: List[str] = field(default_factory=list)
+
+    @property
+    def source_count(self) -> int:
+        """Mevcut kaynak sayısını döndürür."""
+
+        sources = (
+            self.statshub_home,
+            self.statshub_away,
+            self.soccerstats,
+            self.ppi,
+            self.odds,
+        )
+
+        return sum(source is not None for source in sources)
+
+    @property
+    def statistics_source_count(self) -> int:
+        """Mevcut istatistik kaynaklarının sayısını döndürür."""
+
+        sources = (
+            self.statshub_home,
+            self.statshub_away,
+            self.soccerstats,
+            self.ppi,
+        )
+
+        return sum(source is not None for source in sources)
+
+    @property
+    def has_odds(self) -> bool:
+        """Odds kaynağının mevcut olup olmadığını döndürür."""
+
+        return self.odds is not None
+
+
+@dataclass(frozen=True)
 class CanonicalMatchData:
     """
     Tüm external kaynakların birleştiği canonical veri.
 
     Source priority daha sonraki mapping katmanında uygulanır.
     Bu sınıf yalnızca veriyi taşır.
+
+    Geriye dönük uyumluluk amacıyla eski:
+        statshub
+        soccerstats
+        odds
+
+    alanları korunmuştur.
+
+    Yeni 5 kaynaklı pipeline ise:
+        statshub_home
+        statshub_away
+        soccerstats
+        ppi
+        odds
+
+    alanlarını kullanabilir.
     """
 
     match: MatchInfo
@@ -234,6 +356,10 @@ class CanonicalMatchData:
     soccerstats: Optional[SoccerStatsData] = None
     statshub: Optional[StatsHubData] = None
     odds: Optional[OddsData] = None
+
+    statshub_home: Optional[StatsHubData] = None
+    statshub_away: Optional[StatsHubData] = None
+    ppi: Optional[PPIData] = None
 
     canonical_values: Dict[str, Any] = field(default_factory=dict)
 
@@ -243,8 +369,8 @@ class CanonicalMatchData:
 
 def model_to_dict(value: Any) -> Any:
     """
-    Dataclass yapılarını recursive olarak JSON uyumlu dict/list
-    yapısına dönüştürür.
+    Dataclass yapılarını recursive olarak JSON uyumlu
+    dict/list yapısına dönüştürür.
     """
 
     if hasattr(value, "__dataclass_fields__"):
@@ -279,7 +405,9 @@ __all__ = [
     "SourceData",
     "SoccerStatsData",
     "StatsHubData",
+    "PPIData",
     "OddsData",
+    "FiveSourceMatchInput",
     "CanonicalMatchData",
     "model_to_dict",
 ]
