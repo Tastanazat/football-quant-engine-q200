@@ -569,23 +569,23 @@ def show_history_section() -> None:
     ]
 
     def format_history_record(value: int) -> str:
-    match_id = next(
-        (
-            r["match_id"]
-            for r in records
-            if r["id"] == value
-        ),
-        "Unknown",
+        match_id = next(
+            (
+                r["match_id"]
+                for r in records
+                if r["id"] == value
+            ),
+            "Unknown",
+        )
+
+        return f"{value} - {match_id}"
+
+
+    selected_id = st.selectbox(
+        "History kaydı seç",
+        record_ids,
+        format_func=format_history_record,
     )
-
-    return f"{value} - {match_id}"
-
-
-selected_id = st.selectbox(
-    "History kaydı seç",
-    record_ids,
-    format_func=format_history_record,
-)
 
     selected_record = history.get(
         int(selected_id)
