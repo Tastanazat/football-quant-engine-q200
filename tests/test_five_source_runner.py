@@ -3,15 +3,7 @@ Q200 Engine - Five Source Runner Tests
 
 Q200 V3.1
 
-Five Source Runner:
-
-    StatsHub HOME
-    StatsHub AWAY
-    SoccerSTATS
-    PPI
-    Odds
-        ↓
-    Five Source Analysis
+Five Source Runner integration tests.
 """
 
 from __future__ import annotations
@@ -22,25 +14,35 @@ from q200_engine.five_source_runner import (
     FIVE_SOURCE_RUNNER_VERSION,
     run_five_source_files,
 )
+
 from q200_engine.ingestion.models import (
     MatchInfo,
+    StatsHubData,
 )
 
 
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+TESTS_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = TESTS_DIR.parent
+
+
 SOCCERSTATS_PDF = (
-    Path(__file__).resolve().parent
+    TESTS_DIR
     / "fixtures"
     / "soccerstats"
     / "WEB_1789630115.pdf"
 )
 
 PPI_PDF = (
-    Path(__file__).resolve().parent.parent
+    PROJECT_ROOT
     / "WEB_1789630147.pdf"
 )
 
 ODDS_PDF = (
-    Path(__file__).resolve().parent
+    TESTS_DIR
     / "fixtures"
     / "odds"
     / "WEB_1789630248.pdf"
@@ -56,6 +58,11 @@ Possession 100.00 50.85 49.15 38 55 42 60 58 48 64 37 45
 """
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
 def make_match() -> MatchInfo:
     return MatchInfo(
         home_team="Real Betis",
@@ -67,11 +74,42 @@ def make_match() -> MatchInfo:
     )
 
 
+def make_statshub_data(
+    match: MatchInfo,
+    source_name: str,
+) -> StatsHubData:
+    return StatsHubData(
+        match=match,
+        values={
+            "goals_for": 1.70,
+            "goals_agt": 1.35,
+            "xg_avg": 2.92,
+            "total_shots_avg": 15.05,
+            "shots_on_target_avg": 5.65,
+        },
+        raw_text=STATSHUB_TEXT,
+        source_metadata={
+            "source": source_name,
+            "approved": True,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Version
+# ---------------------------------------------------------------------------
+
+
 def test_runner_version() -> None:
     assert (
         FIVE_SOURCE_RUNNER_VERSION
         == "Q200-FIVE-SOURCE-RUNNER-V1"
     )
+
+
+# ---------------------------------------------------------------------------
+# Fixture validation
+# ---------------------------------------------------------------------------
 
 
 def test_required_real_source_files_exist() -> None:
@@ -85,56 +123,46 @@ def test_required_real_source_files_exist() -> None:
     assert ODDS_PDF.is_file()
 
 
+# ---------------------------------------------------------------------------
+# Integration
+# ---------------------------------------------------------------------------
+
+
 def test_runner_reaches_locked_q200_analysis(
     tmp_path,
     monkeypatch,
 ) -> None:
     """
-    Runner'ın bütün kaynakları hazırlayıp mevcut
-    Five Source Pipeline'a ulaştırdığını doğrular.
+    Five Source Runner'ın:
 
-    Gerçek StatsHub görüntüsü olmadığı için
-    loader'ın image fonksiyonu kontrollü şekilde
-    gerçek StatsHubData üretir.
+        StatsHub HOME
+        StatsHub AWAY
+        SoccerSTATS
+        PPI
+        Odds
+            ↓
+        Q200
+            ↓
+        MODEL LOCK
+            ↓
+        ANALYSIS
 
-    Diğer PDF kaynakları gerçek fixture'lardır.
+    zincirine ulaştığını doğrular.
     """
-
-    from q200_engine.five_source_runner import (
-        StatsHubData,
-    )
 
     match = make_match()
 
-    home_data = StatsHubData(
-        match=match,
-        values={
-            "goals_for": 1.70,
-            "goals_agt": 1.35,
-            "xg_avg": 2.92,
-        },
-        raw_text=STATSHUB_TEXT,
-        source_metadata={
-            "source": "StatsHub HOME",
-            "approved": True,
-        },
+    home_data = make_statshub_data(
+        match,
+        "StatsHub HOME",
     )
 
-    away_data = StatsHubData(
-        match=match,
-        values={
-            "goals_for": 1.70,
-            "goals_agt": 1.35,
-            "xg_avg": 2.92,
-        },
-        raw_text=STATSHUB_TEXT,
-        source_metadata={
-            "source": "StatsHub AWAY",
-            "approved": True,
-        },
+    away_data = make_statshub_data(
+        match,
+        "StatsHub AWAY",
     )
 
-    calls = []
+    calls: list[tuple[str, str | None]] = []
 
     def fake_statshub_loader(
         image_path,
@@ -150,7 +178,11 @@ def test_runner_reaches_locked_q200_analysis(
             )
         )
 
-        if "home" in str(image_path).lower():
+        path_text = str(
+            image_path
+        ).lower()
+
+        if "home" in path_text:
             return home_data
 
         return away_data
@@ -161,11 +193,13 @@ def test_runner_reaches_locked_q200_analysis(
     )
 
     home_image = (
-        tmp_path / "statshub_home.jpg"
+        tmp_path
+        / "statshub_home.jpg"
     )
 
     away_image = (
-        tmp_path / "statshub_away.jpg"
+        tmp_path
+        / "statshub_away.jpg"
     )
 
     home_image.write_bytes(
@@ -219,6 +253,11 @@ def test_runner_reaches_locked_q200_analysis(
     )
 
 
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+
 def test_runner_rejects_invalid_match() -> None:
     try:
         run_five_source_files(
@@ -231,10 +270,7 @@ def test_runner_rejects_invalid_match() -> None:
             bankroll=50_000,
         )
     except TypeError as exc:
-        assert (
-            "MatchInfo"
-            in str(exc)
-        )
+        assert "MatchInfo" in str(exc)
     else:
         raise AssertionError(
             "Geçersiz MatchInfo kabul edildi."
