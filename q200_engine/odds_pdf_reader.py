@@ -3,22 +3,22 @@ Q200 Engine - Odds PDF Reader
 
 Q200 V3.1
 
-Gerçek Odds PDF
-        ↓
+Odds PDF
+    ↓
 OddsData
 
-Bu katman yalnızca PDF içindeki oranları okur.
+Bu katman yalnızca oran PDF'sini okur.
 
 ÖNEMLİ:
 - Model oluşturmaz.
 - Lambda hesaplamaz.
-- Poisson hesaplamaz.
-- Monte Carlo çalıştırmaz.
+- Statistics kullanmaz.
 - No-Vig hesaplamaz.
 - EV hesaplamaz.
 - Kelly hesaplamaz.
 
-Odds yalnızca model LOCK sonrasında kullanılmalıdır.
+Görevi:
+Odds PDF → OddsData
 """
 
 from __future__ import annotations
@@ -32,87 +32,159 @@ from .ingestion.models import MatchInfo, OddsData
 
 ODDS_PDF_READER_VERSION = "Q200-ODDS-PDF-READER-V1"
 
-_FLOAT = r"\d+(?:\.\d+)?"
+
+# =========================================================
+# MONTHS
+# =========================================================
 
 _MONTHS = {
-    "ocak": 1,
-    "şubat": 2,
-    "mart": 3,
-    "nisan": 4,
-    "mayıs": 5,
-    "haziran": 6,
-    "temmuz": 7,
-    "ağustos": 8,
-    "eylül": 9,
-    "ekim": 10,
-    "kasım": 11,
-    "aralık": 12,
+    "ocak": "01",
+    "şubat": "02",
+    "mart": "03",
+    "nisan": "04",
+    "mayıs": "05",
+    "haziran": "06",
+    "temmuz": "07",
+    "ağustos": "08",
+    "eylül": "09",
+    "ekim": "10",
+    "kasım": "11",
+    "aralık": "12",
 }
 
 
-def _clean_text(text: str) -> str:
-    return (
-        text
-        .replace("\r", "\n")
-        .replace("\xa0", " ")
-    )
+_FLOAT = r"\d+(?:\.\d+)?"
 
 
-def _normalize_odd(value: str) -> float:
-    odd = float(value)
+# =========================================================
+# ODDS VALIDATION
+# =========================================================
+
+def _validate_odd(
+    value: str | float,
+) -> float:
+    """
+    Odds değerini doğrular.
+    """
+
+    try:
+        odd = float(value)
+
+    except (TypeError, ValueError) as exc:
+
+        raise ValueError(
+            f"Geçersiz oran: {value}"
+        ) from exc
 
     if not math.isfinite(odd):
+
         raise ValueError(
-            f"Odds sonlu bir sayı olmalıdır: {value}"
+            f"Oran finite olmalıdır: {value}"
         )
 
     if odd <= 1.0:
+
         raise ValueError(
-            f"Odds 1.00'dan büyük olmalıdır: {value}"
+            f"Oran 1.00'dan büyük olmalıdır: {value}"
         )
 
     return odd
 
 
-def _extract_match_info(text: str) -> MatchInfo:
+# =========================================================
+# MATCH INFORMATION
+# =========================================================
+
+def _extract_match_info(
+    text: str,
+) -> MatchInfo:
+    """
+    Odds PDF'den maç bilgilerini çıkarır.
+    """
+
     lines = [
         line.strip()
         for line in text.splitlines()
         if line.strip()
     ]
 
-    home_team: str | None = None
-    away_team: str | None = None
+    match_line = next(
+        (
+            line
+            for line in lines
+            if " - " in line
+        ),
+        None,
+    )
 
-    for line in lines[:30]:
-        if " - " not in line:
-            continue
+    if match_line is None:
 
-        if line.startswith("Maç "):
-            continue
-
-        parts = line.split(" - ", 1)
-
-        if len(parts) != 2:
-            continue
-
-        home = parts[0].strip()
-        away = parts[1].strip()
-
-        if not home or not away:
-            continue
-
-        home_team = home
-        away_team = away
-        break
-
-    if home_team is None or away_team is None:
         raise ValueError(
             "Odds PDF maç bilgisi bulunamadı."
         )
 
-    date: str | None = None
-    time: str | None = None
+    parts = [
+        part.strip()
+        for part in match_line.split(" - ")
+    ]
+
+    # PDF extraction bazen:
+    #
+    # Real Betis - GetafeReal Betis - Getafe
+    #
+    # şeklinde tekrar üretebilir.
+    if (
+        len(parts) >= 3
+        and parts[1]
+        in {
+            parts[0] + parts[-1],
+            parts[-1] + parts[0],
+        }
+    ):
+
+        home = parts[0]
+        away = parts[-1]
+
+    else:
+
+        home, away = (
+            part.strip()
+            for part in match_line.split(
+                " - ",
+                1,
+            )
+        )
+
+        # Genel tekrar koruması.
+        if away.startswith(home):
+
+            remainder = (
+                away[len(home):]
+                .strip()
+            )
+
+            if remainder.startswith("-"):
+
+                remainder = (
+                    remainder[1:]
+                    .strip()
+                )
+
+            if remainder:
+
+                away = remainder
+
+    if not home or not away:
+
+        raise ValueError(
+            "Odds PDF takım isimleri bulunamadı."
+        )
+
+    # -----------------------------------------------------
+    # DATE
+    # -----------------------------------------------------
+
+    date = None
 
     date_match = re.search(
         r"(\d{1,2})\s+"
@@ -122,18 +194,28 @@ def _extract_match_info(text: str) -> MatchInfo:
     )
 
     if date_match:
-        day, month_name, year = date_match.groups()
+
+        day, month_name, year = (
+            date_match.groups()
+        )
 
         month = _MONTHS.get(
             month_name.lower()
         )
 
-        if month is not None:
+        if month:
+
             date = (
                 f"{year}-"
-                f"{month:02d}-"
+                f"{month}-"
                 f"{int(day):02d}"
             )
+
+    # -----------------------------------------------------
+    # TIME
+    # -----------------------------------------------------
+
+    time = None
 
     time_match = re.search(
         r"\b(\d{1,2}:\d{2})\b",
@@ -141,44 +223,85 @@ def _extract_match_info(text: str) -> MatchInfo:
     )
 
     if time_match:
+
         time = time_match.group(1)
 
     return MatchInfo(
-        home_team=home_team,
-        away_team=away_team,
+        home_team=home,
+        away_team=away,
         date=date,
         time=time,
         source="OddsPDF",
     )
 
 
+# =========================================================
+# SECTION EXTRACTION
+# =========================================================
+
+def _section(
+    text: str,
+    start: str,
+    end_markers: tuple[str, ...],
+) -> str:
+    """
+    PDF text içerisinden belirli market bölümünü çıkarır.
+    """
+
+    start_index = text.find(start)
+
+    if start_index < 0:
+
+        return ""
+
+    section = text[
+        start_index + len(start):
+    ]
+
+    end_index = len(section)
+
+    for marker in end_markers:
+
+        index = section.find(
+            marker
+        )
+
+        if index >= 0:
+
+            end_index = min(
+                end_index,
+                index,
+            )
+
+    return section[:end_index]
+
+
+# =========================================================
+# 1X2
+# =========================================================
+
 def _parse_1x2(
     text: str,
 ) -> dict[str, float] | None:
-    marker = "Maç Sonucu\n"
+    """
+    Maç Sonucu:
 
-    start = text.find(marker)
+        1
+        X
+        2
 
-    if start < 0:
-        return None
+    değerlerini çıkarır.
+    """
 
-    section = text[start:]
-
-    end_markers = (
-        "Maç Sonucu (2 Gol Farkta Erken Ödeme)",
-        "Çifte Şans",
+    section = _section(
+        text,
+        "Maç Sonucu\n",
+        (
+            "Maç Sonucu "
+            "(2 Gol Farkta Erken Ödeme)",
+            "Çifte Şans",
+        ),
     )
-
-    end_positions = [
-        section.find(marker)
-        for marker in end_markers
-        if section.find(marker) >= 0
-    ]
-
-    if end_positions:
-        section = section[
-            :min(end_positions)
-        ]
 
     match = re.search(
         rf"1\s+({_FLOAT})"
@@ -188,45 +311,41 @@ def _parse_1x2(
     )
 
     if not match:
+
         return None
 
-    home, draw, away = match.groups()
-
     return {
-        "HOME": _normalize_odd(home),
-        "DRAW": _normalize_odd(draw),
-        "AWAY": _normalize_odd(away),
+        "HOME": _validate_odd(
+            match.group(1)
+        ),
+        "DRAW": _validate_odd(
+            match.group(2)
+        ),
+        "AWAY": _validate_odd(
+            match.group(3)
+        ),
     }
 
+
+# =========================================================
+# TOTAL GOALS
+# =========================================================
 
 def _parse_total_goals(
     text: str,
 ) -> dict[str, dict[str, float]]:
-    marker = "Toplam Goller\n"
+    """
+    Toplam Goller marketlerini çıkarır.
+    """
 
-    start = text.find(marker)
-
-    if start < 0:
-        return {}
-
-    section = text[start:]
-
-    end_markers = (
-        "Karşılıklı Gol Olur",
-        "Beraberlikte İade",
-        "Normal Süre Gollü Beraberlik",
+    section = _section(
+        text,
+        "Toplam Goller\n",
+        (
+            "Karşılıklı Gol Olur",
+            "Beraberlikte İade",
+        ),
     )
-
-    end_positions = [
-        section.find(marker)
-        for marker in end_markers
-        if section.find(marker) >= 0
-    ]
-
-    if end_positions:
-        section = section[
-            :min(end_positions)
-        ]
 
     markets: dict[
         str,
@@ -234,53 +353,63 @@ def _parse_total_goals(
     ] = {}
 
     for line in section.splitlines():
+
         match = re.search(
-            rf"Üst\s+({_FLOAT})\s+({_FLOAT})"
-            rf"\s+Alt\s+({_FLOAT})\s+({_FLOAT})",
+            rf"Üst\s+({_FLOAT})"
+            rf"\s+({_FLOAT})"
+            rf"\s+Alt\s+({_FLOAT})"
+            rf"\s+({_FLOAT})",
             line,
         )
 
         if not match:
+
             continue
 
-        threshold_1, over, threshold_2, under = (
-            match.groups()
-        )
+        (
+            threshold,
+            over,
+            under_threshold,
+            under,
+        ) = match.groups()
 
-        if threshold_1 != threshold_2:
+        if threshold != under_threshold:
+
             continue
 
         markets[
-            f"TOTAL_GOALS_{threshold_1}"
+            f"TOTAL_GOALS_{threshold}"
         ] = {
-            "OVER": _normalize_odd(over),
-            "UNDER": _normalize_odd(under),
+            "OVER": _validate_odd(
+                over
+            ),
+            "UNDER": _validate_odd(
+                under
+            ),
         }
 
     return markets
 
 
+# =========================================================
+# BTTS
+# =========================================================
+
 def _parse_btts(
     text: str,
 ) -> dict[str, float] | None:
-    marker = "Karşılıklı Gol Olur\n"
+    """
+    Karşılıklı Gol Olur marketini çıkarır.
+    """
 
-    start = text.find(marker)
-
-    if start < 0:
-        return None
-
-    section = text[start:]
-
-    end_marker = (
-        "Karşılıklı Gol Olur veya "
-        "2.5 Üst Gol Olur"
+    section = _section(
+        text,
+        "Karşılıklı Gol Olur\n",
+        (
+            "Karşılıklı Gol Olur veya "
+            "2.5 Üst Gol Olur",
+        ),
     )
-
-    end = section.find(end_marker)
-
-    if end >= 0:
-        section = section[:end]
 
     match = re.search(
         rf"Evet\s+({_FLOAT})"
@@ -289,43 +418,38 @@ def _parse_btts(
     )
 
     if not match:
+
         return None
 
-    yes, no = match.groups()
-
     return {
-        "YES": _normalize_odd(yes),
-        "NO": _normalize_odd(no),
+        "YES": _validate_odd(
+            match.group(1)
+        ),
+        "NO": _validate_odd(
+            match.group(2)
+        ),
     }
 
+
+# =========================================================
+# TOTAL CORNERS
+# =========================================================
 
 def _parse_total_corners(
     text: str,
 ) -> dict[str, dict[str, float]]:
-    marker = "Toplam Kornerler\n"
+    """
+    Toplam Korner marketlerini çıkarır.
+    """
 
-    start = text.find(marker)
-
-    if start < 0:
-        return {}
-
-    section = text[start:]
-
-    end_markers = (
-        "Toplam Kornerler 3-Yönlü",
-        "1. Yarı - Toplam Kornerler",
+    section = _section(
+        text,
+        "Toplam Kornerler\n",
+        (
+            "Toplam Kornerler 3-Yönlü",
+            "1. Yarı - Toplam Kornerler",
+        ),
     )
-
-    end_positions = [
-        section.find(marker)
-        for marker in end_markers
-        if section.find(marker) >= 0
-    ]
-
-    if end_positions:
-        section = section[
-            :min(end_positions)
-        ]
 
     markets: dict[
         str,
@@ -333,6 +457,275 @@ def _parse_total_corners(
     ] = {}
 
     for line in section.splitlines():
+
         match = re.search(
-            rf"Üst\s+({_FLOAT})\s+({_FLOAT})"
-            rf"\s+
+            rf"Üst\s+({_FLOAT})"
+            rf"\s+({_FLOAT})"
+            rf"\s+Alt\s+({_FLOAT})"
+            rf"\s+({_FLOAT})",
+            line,
+        )
+
+        if not match:
+
+            continue
+
+        (
+            threshold,
+            over,
+            under_threshold,
+            under,
+        ) = match.groups()
+
+        if threshold != under_threshold:
+
+            continue
+
+        markets[
+            f"TOTAL_CORNERS_{threshold}"
+        ] = {
+            "OVER": _validate_odd(
+                over
+            ),
+            "UNDER": _validate_odd(
+                under
+            ),
+        }
+
+    return markets
+
+
+# =========================================================
+# PDF TEXT EXTRACTION
+# =========================================================
+
+def extract_odds_pdf_text(
+    pdf_path: str | Path,
+) -> str:
+    """
+    Odds PDF'den ham text çıkarır.
+    """
+
+    path = Path(pdf_path)
+
+    if not path.is_file():
+
+        raise FileNotFoundError(
+            f"Odds PDF bulunamadı: {path}"
+        )
+
+    if path.suffix.lower() != ".pdf":
+
+        raise ValueError(
+            "Odds reader yalnızca PDF kabul eder: "
+            f"{path}"
+        )
+
+    try:
+
+        from pypdf import PdfReader
+
+    except ImportError as exc:
+
+        raise ImportError(
+            "Odds PDF okumak için pypdf gereklidir."
+        ) from exc
+
+    reader = PdfReader(
+        str(path)
+    )
+
+    pages: list[str] = []
+
+    for page in reader.pages:
+
+        page_text = (
+            page.extract_text()
+            or ""
+        )
+
+        if page_text:
+
+            pages.append(
+                page_text
+            )
+
+    text = "\n".join(
+        pages
+    )
+
+    if not text.strip():
+
+        raise ValueError(
+            "Odds PDF metni boş."
+        )
+
+    return text.replace(
+        "\r",
+        "\n",
+    )
+
+
+# =========================================================
+# TEXT → ODDS DATA
+# =========================================================
+
+def parse_odds_pdf_text(
+    text: str,
+) -> OddsData:
+    """
+    Ham PDF text'ini OddsData'ya dönüştürür.
+    """
+
+    if not isinstance(
+        text,
+        str,
+    ):
+
+        raise TypeError(
+            "text string olmalıdır."
+        )
+
+    match = _extract_match_info(
+        text
+    )
+
+    markets: dict[
+        str,
+        dict[str, float],
+    ] = {}
+
+    # -----------------------------------------------------
+    # 1X2
+    # -----------------------------------------------------
+
+    match_result = _parse_1x2(
+        text
+    )
+
+    if match_result is not None:
+
+        markets["1X2"] = (
+            match_result
+        )
+
+    # -----------------------------------------------------
+    # TOTAL GOALS
+    # -----------------------------------------------------
+
+    markets.update(
+        _parse_total_goals(
+            text
+        )
+    )
+
+    # -----------------------------------------------------
+    # BTTS
+    # -----------------------------------------------------
+
+    btts = _parse_btts(
+        text
+    )
+
+    if btts is not None:
+
+        markets["BTTS"] = btts
+
+    # -----------------------------------------------------
+    # TOTAL CORNERS
+    # -----------------------------------------------------
+
+    markets.update(
+        _parse_total_corners(
+            text
+        )
+    )
+
+    if not markets:
+
+        raise ValueError(
+            "Odds PDF içinde desteklenen "
+            "market bulunamadı."
+        )
+
+    return OddsData(
+        match=match,
+        markets=markets,
+        raw_text=text,
+        source_metadata={
+            "source": "OddsPDF",
+            "parser": (
+                ODDS_PDF_READER_VERSION
+            ),
+        },
+    )
+
+
+# =========================================================
+# PDF → ODDS DATA
+# =========================================================
+
+def parse_odds_pdf(
+    pdf_path: str | Path,
+) -> OddsData:
+    """
+    Gerçek Odds PDF'sini okuyup OddsData üretir.
+    """
+
+    text = extract_odds_pdf_text(
+        pdf_path
+    )
+
+    return parse_odds_pdf_text(
+        text
+    )
+
+
+# =========================================================
+# MARKET ACCESS
+# =========================================================
+
+def odds_data_to_market(
+    data: OddsData,
+    market: str,
+) -> dict[str, float]:
+    """
+    OddsData içinden tek bir market çıkarır.
+    """
+
+    if not isinstance(
+        data,
+        OddsData,
+    ):
+
+        raise TypeError(
+            "data OddsData olmalıdır."
+        )
+
+    key = str(
+        market
+    ).strip().upper()
+
+    if key not in data.markets:
+
+        raise KeyError(
+            f"Odds market bulunamadı: "
+            f"{market}"
+        )
+
+    return dict(
+        data.markets[key]
+    )
+
+
+# =========================================================
+# EXPORTS
+# =========================================================
+
+__all__ = [
+    "ODDS_PDF_READER_VERSION",
+    "extract_odds_pdf_text",
+    "parse_odds_pdf_text",
+    "parse_odds_pdf",
+    "odds_data_to_market",
+]
