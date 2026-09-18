@@ -182,6 +182,11 @@ from .five_source_pipeline import (
     run_five_source_analysis,
 )
 
+from .five_source_runner import (
+    FIVE_SOURCE_RUNNER_VERSION,
+    run_five_source_files,
+)
+
 from .dataset_backtest import (
     DATASET_BACKTEST_VERSION,
     DatasetBacktestItem,
@@ -322,6 +327,9 @@ __all__ = [
     "FIVE_SOURCE_PIPELINE_VERSION",
     "build_locked_model_from_five_sources",
     "run_five_source_analysis",
+
+    "FIVE_SOURCE_RUNNER_VERSION",
+    "run_five_source_files",
 
     "DATASET_BACKTEST_VERSION",
     "DatasetBacktestItem",
