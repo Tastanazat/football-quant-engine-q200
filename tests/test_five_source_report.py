@@ -1,22 +1,27 @@
 """
-Q200 Engine - Five Source Report Integration
+Q200 Engine - Five Source Report Integration Tests
 
 Q200 V3.1
+
+Five Source Runner
+        ↓
+AnalysisResult
+        ↓
+Q200 Report
+        ↓
+JSON / TEXT
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from q200_engine.five_source_runner import (
     run_five_source_files,
 )
-
 from q200_engine.ingestion.models import (
     MatchInfo,
 )
-
 from q200_engine.report import (
     REPORT_VERSION,
     build_report,
@@ -69,47 +74,11 @@ def make_match() -> MatchInfo:
     )
 
 
-def run_real_five_source_analysis(
-    tmp_path: Path,
+def create_analysis_result(
+    tmp_path,
     monkeypatch,
 ):
     match = make_match()
-
-    def fake_statshub_loader(
-        image_path,
-        *,
-        match,
-        ocr_text=None,
-        ocr_engine=None,
-    ):
-        from q200_engine.ingestion.models import (
-            StatsHubData,
-        )
-
-        return StatsHubData(
-            match=match,
-            values={
-                "goals_for": 1.70,
-                "goals_agt": 1.35,
-                "xg_avg": 2.92,
-                "total_shots_avg": 15.05,
-                "shots_on_target_avg": 5.65,
-            },
-            raw_text=STATSHUB_TEXT,
-            source_metadata={
-                "source": (
-                    "StatsHub HOME"
-                    if "home" in str(image_path).lower()
-                    else "StatsHub AWAY"
-                ),
-                "approved": True,
-            },
-        )
-
-    monkeypatch.setattr(
-        "q200_engine.five_source_runner.load_statshub_image",
-        fake_statshub_loader,
-    )
 
     home_image = (
         tmp_path
@@ -129,6 +98,46 @@ def run_real_five_source_analysis(
         b"fake-away-image"
     )
 
+    def fake_statshub_loader(
+        image_path,
+        *,
+        match,
+        ocr_text=None,
+        ocr_engine=None,
+    ):
+        from q200_engine.ingestion.models import (
+            StatsHubData,
+        )
+
+        source_name = (
+            "StatsHub HOME"
+            if "home" in str(
+                image_path
+            ).lower()
+            else "StatsHub AWAY"
+        )
+
+        return StatsHubData(
+            match=match,
+            values={
+                "goals_for": 1.70,
+                "goals_agt": 1.35,
+                "xg_avg": 2.92,
+                "total_shots_avg": 15.05,
+                "shots_on_target_avg": 5.65,
+            },
+            raw_text=STATSHUB_TEXT,
+            source_metadata={
+                "source": source_name,
+                "approved": True,
+            },
+        )
+
+    monkeypatch.setattr(
+        "q200_engine.five_source_runner.load_statshub_image",
+        fake_statshub_loader,
+    )
+
     return run_five_source_files(
         match=match,
         statshub_home_image=home_image,
@@ -144,16 +153,31 @@ def run_real_five_source_analysis(
     )
 
 
-def test_five_source_analysis_builds_report(
+def test_five_source_result_is_locked(
     tmp_path,
     monkeypatch,
 ):
-    result = run_real_five_source_analysis(
+    result = create_analysis_result(
         tmp_path,
         monkeypatch,
     )
 
     assert result.snapshot.locked is True
+
+    assert (
+        result.snapshot.model_version
+        == "Q200-V3.1"
+    )
+
+
+def test_five_source_result_builds_report(
+    tmp_path,
+    monkeypatch,
+):
+    result = create_analysis_result(
+        tmp_path,
+        monkeypatch,
+    )
 
     report = build_report(
         result
@@ -174,45 +198,157 @@ def test_five_source_analysis_builds_report(
         is True
     )
 
+    assert (
+        report["model_version"]
+        == "Q200-V3.1"
+    )
 
-def test_five_source_analysis_builds_valid_json_report(
+    assert "model" in report
+
+    assert "stress_test" in report
+
+    assert "odds_analysis" in report
+
+    assert "selection" in report
+
+
+def test_five_source_report_contains_model(
     tmp_path,
     monkeypatch,
 ):
-    result = run_real_five_source_analysis(
+    result = create_analysis_result(
         tmp_path,
         monkeypatch,
     )
 
-    json_text = report_to_json(
+    report = build_report(
         result
     )
 
-    parsed = json.loads(
-        json_text
-    )
-
-    assert isinstance(
-        parsed,
-        dict,
+    assert (
+        report["model"]["lambda_home"]
+        == result.snapshot.lambda_home
     )
 
     assert (
-        parsed["report_version"]
-        == REPORT_VERSION
+        report["model"]["lambda_away"]
+        == result.snapshot.lambda_away
     )
 
     assert (
-        parsed["model_locked"]
-        is True
+        report["model"]["probabilities"]
+        == result.snapshot.probabilities
+    )
+
+    assert (
+        report["model"]["monte_carlo_probabilities"]
+        == result.snapshot.monte_carlo_probabilities
     )
 
 
-def test_five_source_analysis_builds_text_report(
+def test_five_source_report_contains_odds_analysis(
     tmp_path,
     monkeypatch,
 ):
-    result = run_real_five_source_analysis(
+    result = create_analysis_result(
+        tmp_path,
+        monkeypatch,
+    )
+
+    report = build_report(
+        result
+    )
+
+    assert (
+        report["odds_analysis"]["fair_odds"]
+        == result.fair_odds
+    )
+
+    assert (
+        report["odds_analysis"]["no_vig_probabilities"]
+        == result.no_vig_probabilities
+    )
+
+    assert (
+        report["odds_analysis"]["baseline_ev"]
+        == result.ev
+    )
+
+    assert (
+        report["odds_analysis"]["pessimistic_ev"]
+        == result.pessimistic_ev
+    )
+
+
+def test_five_source_report_contains_selection(
+    tmp_path,
+    monkeypatch,
+):
+    result = create_analysis_result(
+        tmp_path,
+        monkeypatch,
+    )
+
+    report = build_report(
+        result
+    )
+
+    selection = report[
+        "selection"
+    ]
+
+    assert "selections" in selection
+
+    assert (
+        "eligible_count"
+        in selection
+    )
+
+    assert (
+        "total_stake"
+        in selection
+    )
+
+
+def test_five_source_report_to_json(
+    tmp_path,
+    monkeypatch,
+):
+    result = create_analysis_result(
+        tmp_path,
+        monkeypatch,
+    )
+
+    text = report_to_json(
+        result
+    )
+
+    assert isinstance(
+        text,
+        str,
+    )
+
+    assert (
+        '"report_version"'
+        in text
+    )
+
+    assert (
+        '"model_locked": true'
+        in text
+    )
+
+    assert (
+        '"model_version": "Q200-V3.1"'
+        in text
+    )
+
+
+def test_five_source_report_to_text(
+    tmp_path,
+    monkeypatch,
+):
+    result = create_analysis_result(
         tmp_path,
         monkeypatch,
     )
@@ -226,6 +362,32 @@ def test_five_source_analysis_builds_text_report(
         str,
     )
 
-    assert text.strip()
+    assert (
+        "Q200 V3.1 ANALİZ RAPORU"
+        in text
+    )
 
-    assert "Q200" in text
+    assert (
+        "MODEL"
+        in text
+    )
+
+    assert (
+        "MODEL PROBABILITIES"
+        in text
+    )
+
+    assert (
+        "ODDS ANALYSIS"
+        in text
+    )
+
+    assert (
+        "PESSIMISTIC EV"
+        in text
+    )
+
+    assert (
+        "SELECTION"
+        in text
+    )
