@@ -5,20 +5,24 @@ Q200 V3.1
 
 External source ingestion layer:
 
-    SoccerSTATS PDF
-    StatsHub OCR
-    Odds PDF
+    1. StatsHub HOME
+    2. StatsHub AWAY
+    3. SoccerSTATS
+    4. PPI
+    5. Odds
 """
 
 from .models import (
     INGESTION_VERSION,
     CanonicalMatchData,
     CornerStats,
+    FiveSourceMatchInput,
     FormStats,
     GoalStats,
     H2HStats,
     MatchInfo,
     OddsData,
+    PPIData,
     SoccerStatsData,
     SourceData,
     StatsHubData,
@@ -79,7 +83,9 @@ __all__ = [
     "SourceData",
     "SoccerStatsData",
     "StatsHubData",
+    "PPIData",
     "OddsData",
+    "FiveSourceMatchInput",
     "CanonicalMatchData",
     "model_to_dict",
 
