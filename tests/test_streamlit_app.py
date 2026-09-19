@@ -9,7 +9,7 @@ def test_streamlit_app_imports() -> None:
     )
 
     assert module.APP_VERSION == (
-        "Q200-STREAMLIT-V1"
+        "Q200-STREAMLIT-V2"
     )
 
 
