@@ -9,11 +9,15 @@ Kurallar:
 - Minimum 100.000 iterasyon
 - Negatif lambda kabul edilmez
 - HOME / DRAW / AWAY olasılıkları döndürülür
-- İsteğe bağlı seed ile tekrarlanabilir sonuç alınabilir
+- Seed verilmezse dahi girdilerden deterministik olarak
+  türetilir: AYNI (lambda_home, lambda_away, iterations)
+  girdisi HER ZAMAN AYNI sonucu üretir. İsteğe bağlı
+  seed ile de tekrarlanabilir sonuç zorlanabilir.
 """
 
 from __future__ import annotations
 
+import hashlib
 import math
 import random
 from typing import Optional
@@ -76,6 +80,43 @@ def _validate_iterations(iterations: int) -> int:
         )
 
     return iterations
+
+
+# =========================================================
+# DETERMINISTIC SEED
+# =========================================================
+
+def _derive_seed(
+    lambda_home: float,
+    lambda_away: float,
+    iterations: int,
+) -> int:
+    """
+    Girdilerden deterministik bir seed türetir.
+
+    Aynı (lambda_home, lambda_away, iterations) üçlüsü
+    HER ZAMAN aynı seed'i, dolayısıyla aynı Monte Carlo
+    sonucunu üretir. Farklı maçlar (farklı lambda'lar)
+    farklı seed alır, bu yüzden simülasyonlar arasında
+    yapay bir korelasyon oluşmaz.
+
+    `random.Random.seed` int/hash tabanlı Python
+    çalıştırmaları arasında (PYTHONHASHSEED farkı gibi
+    nedenlerle) değişebildiği için burada hashlib
+    kullanılır; bu, süreçler ve makineler arasında
+    kararlıdır.
+    """
+
+    key = (
+        f"{lambda_home:.12f}:"
+        f"{lambda_away:.12f}:"
+        f"{iterations}"
+    ).encode("utf-8")
+
+    digest = hashlib.sha256(key).hexdigest()
+
+    # 64 bit'lik kararlı bir tamsayı seed.
+    return int(digest[:16], 16)
 
 
 # =========================================================
@@ -148,8 +189,12 @@ def simulate_match(
 
         seed:
             İsteğe bağlı random seed.
-            Aynı seed kullanılırsa aynı simülasyon sonucu
-            tekrar üretilebilir.
+            Belirtilmezse (None), lambda_home / lambda_away /
+            iterations değerlerinden deterministik olarak
+            türetilir. Böylece AYNI GİRDİLER HER ZAMAN AYNI
+            SONUCU üretir; farklı seed zorlamak isteyen
+            çağıranlar bu parametreyi elle geçebilir
+            (ör. duyarlılık/stres testleri için).
 
     Returns:
         {
@@ -187,15 +232,22 @@ def simulate_match(
     # -----------------------------------------------------
 
     if seed is not None:
-        if not isinstance(seed, int):
+        if isinstance(seed, bool) or not isinstance(
+            seed, int
+        ):
             raise TypeError(
                 "seed integer olmalıdır."
             )
 
-        rng = random.Random(seed)
-
     else:
-        rng = random
+        # Deterministik seed: aynı girdi -> aynı sonuç.
+        seed = _derive_seed(
+            lambda_home,
+            lambda_away,
+            iterations,
+        )
+
+    rng = random.Random(seed)
 
     # -----------------------------------------------------
     # COUNTERS
