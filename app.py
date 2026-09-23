@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import streamlit as st
@@ -42,6 +43,9 @@ from q200_engine.five_source_loader import (
 )
 from q200_engine.five_source_pipeline import (
     run_five_source_analysis,
+)
+from q200_engine.history import (
+    AnalysisHistory,
 )
 from q200_engine.ingestion.models import (
     MatchInfo,
@@ -59,6 +63,26 @@ from q200_engine.statshub_review_mapper import (
 
 
 APP_VERSION = "Q200-STREAMLIT-V1"
+
+# streamlit_app.py ile AYNI dosya: her iki arayüz de aynı
+# History veritabanını paylaşır, kayıtlar birleşik kalır.
+HISTORY_PATH = Path(
+    "q200_history.sqlite3"
+)
+
+
+@st.cache_resource
+def get_history() -> AnalysisHistory:
+    """
+    Kalıcı Q200 History repository.
+    """
+
+    return AnalysisHistory(
+        HISTORY_PATH
+    )
+
+
+history = get_history()
 
 
 st.set_page_config(
@@ -531,6 +555,51 @@ if st.button(
             "Q200 analizi başarıyla tamamlandı."
         )
 
+        # ---------------------------------------------
+        # HISTORY - OTOMATİK KAYIT
+        # ---------------------------------------------
+        # Analiz tamamlanan HER çalıştırma, kullanıcı
+        # ayrıca bir şey yapmadan History'ye yazılır.
+        # Böylece geçmiş hiçbir zaman kaybolmaz ve
+        # streamlit_app.py ile aynı davranış sağlanır.
+
+        try:
+
+            timestamp = datetime.now(
+                timezone.utc
+            ).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+
+            auto_match_id = (
+                f"{match.home_team} vs "
+                f"{match.away_team} "
+                f"({match.date or '?'} "
+                f"{match.time or '?'}) "
+                f"[{timestamp}]"
+            )
+
+            record_id = history.save(
+                result,
+                auto_match_id,
+            )
+
+            st.session_state[
+                "last_history_record_id"
+            ] = record_id
+
+            st.info(
+                "🗂️ Analiz otomatik olarak "
+                f"History'ye kaydedildi. Record ID: {record_id}"
+            )
+
+        except Exception as history_exc:
+
+            st.warning(
+                "Analiz tamamlandı ancak History kaydı "
+                f"başarısız oldu: {history_exc}"
+            )
+
     except Exception as exc:
 
         st.session_state.analysis_result = None
@@ -677,4 +746,63 @@ if result is not None:
             indent=2,
         ),
         language="json",
+    )
+
+
+# =========================================================
+# HISTORY
+# =========================================================
+
+st.divider()
+st.header("7. Q200 History")
+
+total_records = history.count()
+completed_records = history.count_completed()
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.metric("Toplam kayıt", total_records)
+
+with col2:
+    st.metric(
+        "Sonucu girilmiş kayıt",
+        completed_records,
+    )
+
+recent_records = history.list(limit=20)
+
+if not recent_records:
+
+    st.info(
+        "Henüz History kaydı yok. "
+        "Bir analiz çalıştırdığınızda otomatik olarak "
+        "burada listelenecek."
+    )
+
+else:
+
+    st.dataframe(
+        [
+            {
+                "id": record["id"],
+                "match_id": record["match_id"],
+                "created_at": record["created_at"],
+                "result_recorded": record[
+                    "result_recorded"
+                ],
+                "settlement_recorded": record[
+                    "settlement_recorded"
+                ],
+            }
+            for record in recent_records
+        ],
+        use_container_width=True,
+    )
+
+    st.caption(
+        "Maç sonucu girmek, settlement hesaplamak ve "
+        "geçmişi detaylı incelemek için streamlit_app.py "
+        "arayüzünü de kullanabilirsiniz; her iki arayüz "
+        f"aynı '{HISTORY_PATH}' veritabanını paylaşır."
     )
